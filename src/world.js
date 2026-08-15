@@ -185,7 +185,12 @@ function makeBuilding(x, z, w, d, h, opts) {
       map: opts.map,
       color: opts.color,
       roughness: 0.85,
-      metalness: 0.02
+      metalness: 0.02,
+      // On night maps the facade texture doubles as an emissive mask, so the
+      // window rectangles in it glow while the surrounding wall stays dark.
+      ...(opts.night && opts.map
+        ? { emissive: 0xffcb7a, emissiveMap: opts.map, emissiveIntensity: 0.55 }
+        : {})
     })
   );
   mesh.position.set(x, 0, z);
@@ -199,6 +204,8 @@ function makeBuilding(x, z, w, d, h, opts) {
   roof.position.set(x, h, z);
   roof.castShadow = true;
 
+  const maxHp = Math.round(40 + w * d * 0.35 + h * 5);
+
   return {
     mesh,
     roof,
@@ -208,7 +215,13 @@ function makeBuilding(x, z, w, d, h, opts) {
     max: new THREE.Vector3(x + w / 2, h, z + d / 2),
     center: new THREE.Vector3(x, h / 2, z),
     alive: true,
-    collapse: 0
+    collapse: 0,
+    // Structural strength scales with footprint and height, so a tower soaks up
+    // far more gunfire than a shed. Bomb blasts bypass this and destroy outright.
+    hp: maxHp,
+    maxHp,
+    baseColor: mesh.material.color.clone(),
+    burning: false
   };
 }
 
@@ -379,6 +392,7 @@ export function createWorld(map) {
             color: t.facades[(Math.random() * t.facades.length) | 0],
             roofMat,
             tile,
+            night: !!map.night,
             roofThickness: t.style === 'chalet' ? 1.6 : 0.8
           });
           group.add(bld.mesh, bld.roof);
@@ -583,7 +597,8 @@ export function createWorld(map) {
         map: facade,
         color: 0x8d8577,
         roofMat,
-        tile
+        tile,
+        night: !!map.night
       });
       group.add(shed.mesh, shed.roof);
       buildings.push(shed);
@@ -686,7 +701,45 @@ export function createWorld(map) {
     return { y: 0, water: false };
   };
 
-  return { map, group, buildings, hazards, runway, surfaceAt };
+  /** Destructible box containing `p`, grown by `pad`. */
+  const buildingAt = (p, pad = 0) => {
+    for (const b of buildings) {
+      if (!b.alive) continue;
+      if (
+        p.x > b.min.x - pad && p.x < b.max.x + pad &&
+        p.z > b.min.z - pad && p.z < b.max.z + pad &&
+        p.y > b.min.y - pad && p.y < b.max.y + pad
+      ) {
+        return b;
+      }
+    }
+    return null;
+  };
+
+  /** Indestructible terrain: buttes are cylinders, peaks are cones. */
+  const hazardAt = (p) => {
+    for (const h of hazards) {
+      if (p.y > h.h || p.y < 0) continue;
+      const rr = h.cone ? h.r * (1 - p.y / h.h) : h.r;
+      const dx = p.x - h.x;
+      const dz = p.z - h.z;
+      if (dx * dx + dz * dz < rr * rr) return h;
+    }
+    return null;
+  };
+
+  return {
+    map,
+    group,
+    buildings,
+    hazards,
+    runway,
+    surfaceAt,
+    buildingAt,
+    hazardAt,
+    /** street layout, so the crowd knows where the pavements are */
+    streets: { grid: t.grid, cell: CELL, half: TOWN_HALF, road: t.road }
+  };
 }
 
 /* ====================== teardown ====================== */

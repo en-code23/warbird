@@ -28,17 +28,17 @@ export const MAPS = [
     },
     ground: 0x5f7a45,
     town: {
-      grid: 6, block: 72, road: 18,
+      grid: 9, block: 76, road: 18,
       minH: 7, maxH: 29, downtown: 3.4,
       vacancy: 0.12, bigLotChance: 0.25,
-      park: [1, 4],
+      park: [2, 6],
       style: 'office',
       facades: [0xa89f92, 0x8f9aa3, 0xb0857a, 0x9aa08d, 0xc2b7a4, 0x7f8a92],
       roadColor: 0x2f3235,
       roofColor: 0x4a4a4c,
       lawnColor: 0x4e7d3a
     },
-    runway: { x: 0, z: 430, length: 300, width: 30, axis: 'z', dir: -1, hangars: 2 },
+    runway: { x: 0, z: 620, length: 300, width: 30, axis: 'z', dir: -1, hangars: 2 },
     scatter: [{ kind: 'tree', count: 140, spread: 1600, offset: [0, 60] }]
   },
 
@@ -63,18 +63,18 @@ export const MAPS = [
     },
     ground: 0x6d7c4c,
     town: {
-      grid: 5, block: 80, road: 20,
+      grid: 8, block: 82, road: 20,
       minH: 9, maxH: 34, downtown: 4.4,
       vacancy: 0.10, bigLotChance: 0.3,
-      park: [0, 3],
+      park: [1, 5],
       style: 'office',
       facades: [0x9aa7b0, 0xb9b0a2, 0x8894a0, 0xa8b2b8, 0xc0b49f],
       roadColor: 0x33383c,
       roofColor: 0x444a4e,
       lawnColor: 0x4f7f3c
     },
-    runway: { x: 0, z: 470, length: 280, width: 32, axis: 'x', dir: 1, hangars: 1 },
-    water: { at: 300, level: 0.3, color: 0x1e5070, opacity: 0.9 },
+    runway: { x: 0, z: 700, length: 280, width: 32, axis: 'x', dir: 1, hangars: 1 },
+    water: { at: 470, level: 0.3, color: 0x1e5070, opacity: 0.9 },
     piers: 4,
     scatter: [{ kind: 'tree', count: 90, spread: 1300, offset: [0, -140] }]
   },
@@ -100,7 +100,7 @@ export const MAPS = [
     },
     ground: 0xb59263,
     town: {
-      grid: 5, block: 58, road: 15,
+      grid: 8, block: 60, road: 15,
       minH: 5, maxH: 13, downtown: 1.5,
       vacancy: 0.2, bigLotChance: 0.4,
       park: null,
@@ -110,7 +110,7 @@ export const MAPS = [
       roofColor: 0x9a7c55,
       lawnColor: 0x8f9a5a
     },
-    runway: { x: -40, z: 400, length: 260, width: 28, axis: 'z', dir: -1, hangars: 1 },
+    runway: { x: -40, z: 600, length: 260, width: 28, axis: 'z', dir: -1, hangars: 1 },
     mesas: { count: 16, minR: 26, maxR: 62, minH: 55, maxH: 150, color: 0xa8703f, ring: [330, 900] },
     scatter: [{ kind: 'cactus', count: 120, spread: 1700, offset: [0, 0] }]
   },
@@ -136,19 +136,94 @@ export const MAPS = [
     },
     ground: 0x6b7a5e,
     town: {
-      grid: 4, block: 66, road: 16,
+      grid: 7, block: 68, road: 16,
       minH: 8, maxH: 20, downtown: 2.0,
       vacancy: 0.14, bigLotChance: 0.35,
-      park: [1, 2],
+      park: [2, 4],
       style: 'chalet',
       facades: [0xd8cbb4, 0xc4b49a, 0xb9a288, 0xded2bc],
       roadColor: 0x3a3a38,
       roofColor: 0x6b4a3a,
       lawnColor: 0x5d7a48
     },
-    runway: { x: 0, z: 380, length: 220, width: 26, axis: 'z', dir: -1, hangars: 1 },
+    runway: { x: 0, z: 560, length: 220, width: 26, axis: 'z', dir: -1, hangars: 1 },
     mountains: { count: 13, minR: 190, maxR: 340, minH: 260, maxH: 460, color: 0x5d6357, snow: 0xe8eef2, ring: [640, 1150] },
     scatter: [{ kind: 'pine', count: 200, spread: 1500, offset: [0, 0] }]
+  },
+
+  {
+    id: 'steelworks',
+    name: 'Steelworks',
+    blurb:
+      'A sprawling industrial city under permanent overcast. Big flat sheds and ' +
+      'almost no landmarks — easy to get lost over, and very easy to hit.',
+    difficulty: 'Moderate',
+    env: {
+      skyTop: 0x5a6470,
+      skyHorizon: 0x9aa2a8,
+      fogDensity: 0.00088,
+      sunDir: [0.2, 0.5, -0.84],
+      sunColor: 0xd8dde0,
+      sunIntensity: 1.5,
+      hemiSky: 0xa8b2ba,
+      hemiGround: 0x4a4a46,
+      hemiIntensity: 1.3,
+      ambient: 0.3,
+      exposure: 1.0,
+      clouds: { count: 70, opacity: 0.9, color: 0xb8bec4, baseY: 150, spread: 200 }
+    },
+    ground: 0x5c6250,
+    town: {
+      grid: 9, block: 88, road: 20,
+      minH: 6, maxH: 26, downtown: 2.2,
+      vacancy: 0.08, bigLotChance: 0.5,
+      park: [6, 1],
+      style: 'office',
+      facades: [0x8a8d8f, 0x7b6f63, 0x92918c, 0x6f7a80, 0x87796b],
+      roadColor: 0x35383a,
+      roofColor: 0x53565a,
+      lawnColor: 0x5f7a45
+    },
+    runway: { x: 0, z: 700, length: 320, width: 32, axis: 'z', dir: -1, hangars: 2 },
+    scatter: [{ kind: 'tree', count: 70, spread: 1800, offset: [0, 0] }]
+  },
+
+  {
+    id: 'nightfall',
+    name: 'Nightfall',
+    blurb:
+      'The same kind of city at two in the morning. Every window is lit and nothing ' +
+      'else is — you fly the approach on the PAPI and the instruments alone.',
+    difficulty: 'Hard',
+    night: true,
+    env: {
+      skyTop: 0x05070f,
+      skyHorizon: 0x1b2436,
+      fogDensity: 0.00068,
+      sunDir: [-0.4, 0.35, -0.85],
+      sunColor: 0x8fa4d0,
+      sunIntensity: 0.32,
+      hemiSky: 0x2a3550,
+      hemiGround: 0x14161c,
+      hemiIntensity: 0.5,
+      ambient: 0.1,
+      exposure: 1.25,
+      clouds: { count: 24, opacity: 0.3, color: 0x3d4450, baseY: 220, spread: 260 }
+    },
+    ground: 0x1d2422,
+    town: {
+      grid: 9, block: 78, road: 18,
+      minH: 8, maxH: 30, downtown: 3.6,
+      vacancy: 0.1, bigLotChance: 0.25,
+      park: [3, 6],
+      style: 'office',
+      facades: [0x5a5f66, 0x4e565e, 0x63605a, 0x555a60],
+      roadColor: 0x1a1c1f,
+      roofColor: 0x2a2d30,
+      lawnColor: 0x24331f
+    },
+    runway: { x: 0, z: 640, length: 300, width: 30, axis: 'z', dir: -1, hangars: 2 },
+    scatter: [{ kind: 'tree', count: 90, spread: 1700, offset: [0, 0] }]
   }
 ];
 

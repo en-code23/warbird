@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bomber Run — Three.js Flight Sim</title>
+  <title>Warbird — browser flight sim</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./src/style.css">
   <script type="importmap">
@@ -18,6 +18,7 @@
 <body>
   <canvas id="view"></canvas>
 
+  <!-- ============================ HUD ============================ -->
   <div id="hud" class="hidden">
     <div class="hud-corner tl">
       <div class="gauge"><span class="label">SPD</span><span class="value" id="v-speed">0</span><span class="unit">kt</span></div>
@@ -27,10 +28,11 @@
     </div>
 
     <div class="hud-corner tr">
-      <div class="gauge"><span class="label">BOMBS</span><span class="value" id="v-bombs">24</span></div>
-      <div class="gauge"><span class="label">HITS</span><span class="value" id="v-score">0</span></div>
+      <div class="gauge"><span class="label">AMMO</span><span class="value" id="v-ammo">0</span></div>
+      <div class="gauge"><span class="label">BOMBS</span><span class="value" id="v-bombs">0</span></div>
+      <div class="gauge"><span class="label">SCORE</span><span class="value" id="v-score">0</span></div>
       <div class="gauge"><span class="label">FIELD</span><span class="value" id="v-field">0</span><span class="unit">m</span></div>
-      <div class="mapname" id="v-map">Midtown</div>
+      <div class="mapname" id="v-map">&mdash;</div>
     </div>
 
     <div class="hud-corner bl">
@@ -38,24 +40,35 @@
         <div class="throttle-label">THR <span id="v-thr">70</span>%</div>
         <div class="throttle-track"><div class="throttle-fill" id="v-thrbar"></div></div>
       </div>
+      <div class="hp-bar" title="Airframe integrity">
+        <div class="hp-fill" id="v-hpbar"></div>
+      </div>
       <div class="warn-row">
         <div class="warn" id="v-stall">STALL</div>
         <div class="warn brake" id="v-brake">BRAKE</div>
+        <div class="warn dmg" id="v-dmg">DAMAGE</div>
       </div>
     </div>
 
     <div class="hud-corner br">
       <div class="keys">
-        <div><b>W/S</b> pitch &nbsp; <b>A/D</b> roll &nbsp; <b>Q/E</b> rudder &nbsp; <b>B</b> brakes</div>
-        <div><b>&uarr;/&darr;</b> throttle &nbsp; <b>SPACE</b> bomb &nbsp; <b>C</b> view &nbsp; <b>M</b> maps &nbsp; <b>R</b> respawn</div>
+        <div><b>W/S</b> pitch &nbsp; <b>Q/E</b> roll &nbsp; <b>A/D</b> rudder &nbsp; <b>B</b> brakes</div>
+        <div><b>LMB</b> guns &nbsp; <b>RMB</b> scope &nbsp; <b>SPACE</b> bomb &nbsp; <b>C</b> view</div>
+        <div><b>&uarr;/&darr;</b> throttle &nbsp; <b>M</b> menu &nbsp; <b>R</b> respawn</div>
       </div>
+    </div>
+
+    <!-- mode banner: countdown for Strike, standings for Multiplayer -->
+    <div class="modebar" id="v-modebar">
+      <span class="mb-label" id="v-mblabel">TIME</span>
+      <span class="mb-value" id="v-mbvalue">&mdash;</span>
     </div>
 
     <!-- approach guidance, shown only on final -->
     <div class="approach hidden" id="v-approach">
       <div class="ap-title">APPROACH</div>
-      <div class="ap-row"><span>DIST</span><b id="v-apdist">—</b></div>
-      <div class="ap-row"><span>G/S</span><b id="v-apgs">—</b></div>
+      <div class="ap-row"><span>DIST</span><b id="v-apdist">&mdash;</b></div>
+      <div class="ap-row"><span>G/S</span><b id="v-apgs">&mdash;</b></div>
       <div class="ap-scale">
         <div class="ap-tick high">HIGH</div>
         <div class="ap-track"><div class="ap-mark" id="v-apmark"></div><div class="ap-target"></div></div>
@@ -63,7 +76,7 @@
       </div>
     </div>
 
-    <div class="reticle">
+    <div class="reticle" id="v-reticle">
       <svg viewBox="0 0 100 100" aria-hidden="true">
         <circle cx="50" cy="50" r="13" />
         <line x1="50" y1="26" x2="50" y2="36" />
@@ -73,37 +86,193 @@
       </svg>
     </div>
 
+    <!-- reflector gunsight, swapped in when the scope is up -->
+    <div class="scope hidden" id="v-scope">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle cx="100" cy="100" r="72" class="ring" />
+        <circle cx="100" cy="100" r="30" class="ring thin" />
+        <circle cx="100" cy="100" r="2.2" class="dot" />
+        <line x1="100" y1="14" x2="100" y2="62" />
+        <line x1="100" y1="138" x2="100" y2="186" />
+        <line x1="14" y1="100" x2="62" y2="100" />
+        <line x1="138" y1="100" x2="186" y2="100" />
+        <line x1="88" y1="118" x2="112" y2="118" class="thin" />
+        <line x1="92" y1="132" x2="108" y2="132" class="thin" />
+        <line x1="95" y1="146" x2="105" y2="146" class="thin" />
+      </svg>
+    </div>
+
+    <div class="killfeed" id="v-killfeed"></div>
     <div class="banner" id="v-banner"></div>
+    <div class="coinpop" id="v-coinpop"></div>
   </div>
 
-  <div id="menu">
-    <div class="panel">
-      <h1>Bomber&nbsp;Run</h1>
-      <p class="sub" id="menu-title">Choose a target</p>
+  <!-- ========================== OVERLAY ========================== -->
+  <div id="overlay">
+    <div class="wallet" id="v-wallet">
+      <span class="coin">&#9679;</span><span id="v-coins">0</span>
+    </div>
 
-      <div class="maps" id="map-list"></div>
+    <!-- ---------- main menu ---------- -->
+    <section class="screen" data-screen="menu">
+      <div class="panel">
+        <h1>Warbird</h1>
+        <p class="sub" id="menu-sub">Choose a game mode</p>
+        <div class="modes" id="mode-list"></div>
+        <div class="menu-actions">
+          <button class="btn" data-goto="hangar">Hangar &amp; Shop</button>
+          <button class="btn ghost" data-goto="help">Controls</button>
+        </div>
+      </div>
+    </section>
 
-      <details class="ctrl-details">
-        <summary>Controls</summary>
+    <!-- ---------- map picker ---------- -->
+    <section class="screen" data-screen="maps" hidden>
+      <div class="panel wide">
+        <h1 id="maps-title">Choose a target</h1>
+        <p class="sub" id="maps-sub">Damage and score reset when you switch</p>
+        <div class="duration" id="duration-row">
+          <span class="dur-label">SORTIE LENGTH</span>
+          <div class="dur-opts" id="dur-opts"></div>
+        </div>
+        <div class="maps" id="map-list"></div>
+        <div class="menu-actions">
+          <button class="btn ghost" data-goto="menu">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- hangar / shop ---------- -->
+    <section class="screen" data-screen="hangar" hidden>
+      <div class="panel wide">
+        <h1>Hangar</h1>
+        <p class="sub">Buy it once, fly it forever. Equipped kit is used on every sortie.</p>
+        <div class="tabs" id="shop-tabs">
+          <button class="tab active" data-kind="planes">Aircraft</button>
+          <button class="tab" data-kind="guns">Guns</button>
+          <button class="tab" data-kind="bombs">Bombs</button>
+        </div>
+        <div class="shop-grid" id="shop-list"></div>
+        <div class="menu-actions">
+          <button class="btn ghost" data-goto="menu">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- multiplayer lobby browser ---------- -->
+    <section class="screen" data-screen="lobby" hidden>
+      <div class="panel wide">
+        <h1>Multiplayer</h1>
+        <p class="sub" id="lobby-status">Not connected</p>
+
+        <div class="lobby-conn">
+          <label class="field">
+            <span>Server</span>
+            <input type="text" id="lobby-server" placeholder="ws://localhost:8080" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Callsign</span>
+            <input type="text" id="lobby-name" maxlength="14" placeholder="Pilot" autocomplete="off">
+          </label>
+          <button class="btn" id="lobby-connect">Connect</button>
+        </div>
+
+        <div class="lobby-body">
+          <div class="lobby-col">
+            <h2>Open lobbies</h2>
+            <div class="lobby-list" id="lobby-list">
+              <p class="empty">Connect to a server to see lobbies.</p>
+            </div>
+          </div>
+
+          <div class="lobby-col">
+            <h2>Create a lobby</h2>
+            <label class="field">
+              <span>Name</span>
+              <input type="text" id="create-name" maxlength="24" placeholder="Dogfight" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Map</span>
+              <select id="create-map"></select>
+            </label>
+            <label class="field">
+              <span>Max players</span>
+              <select id="create-max">
+                <option>2</option><option>4</option><option selected>8</option><option>16</option>
+              </select>
+            </label>
+            <label class="field checkbox">
+              <input type="checkbox" id="create-private">
+              <span>Private lobby (password)</span>
+            </label>
+            <label class="field" id="create-pass-field" hidden>
+              <span>Password</span>
+              <input type="password" id="create-pass" maxlength="32" autocomplete="new-password">
+            </label>
+            <button class="btn" id="create-go" disabled>Create lobby</button>
+          </div>
+        </div>
+
+        <div class="menu-actions">
+          <button class="btn ghost" data-goto="menu">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- lobby room ---------- -->
+    <section class="screen" data-screen="room" hidden>
+      <div class="panel">
+        <h1 id="room-name">Lobby</h1>
+        <p class="sub" id="room-sub">Waiting for players</p>
+        <div class="roster" id="room-roster"></div>
+        <div class="menu-actions">
+          <button class="btn" id="room-start">Launch</button>
+          <button class="btn ghost" id="room-leave">Leave</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- results ---------- -->
+    <section class="screen" data-screen="results" hidden>
+      <div class="panel">
+        <h1 id="results-title">Sortie complete</h1>
+        <p class="sub" id="results-sub"></p>
+        <div class="results" id="results-body"></div>
+        <div class="menu-actions">
+          <button class="btn" data-goto="menu">Continue</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- controls ---------- -->
+    <section class="screen" data-screen="help" hidden>
+      <div class="panel">
+        <h1>Controls</h1>
         <table class="controls">
           <tr><td><kbd>W</kbd><kbd>S</kbd></td><td>Pitch down / up</td></tr>
-          <tr><td><kbd>A</kbd><kbd>D</kbd></td><td>Roll left / right</td></tr>
-          <tr><td><kbd>Q</kbd><kbd>E</kbd></td><td>Rudder</td></tr>
+          <tr><td><kbd>Q</kbd><kbd>E</kbd></td><td>Roll left / right</td></tr>
+          <tr><td><kbd>A</kbd><kbd>D</kbd></td><td>Rudder left / right</td></tr>
           <tr><td><kbd>&uarr;</kbd><kbd>&darr;</kbd></td><td>Throttle</td></tr>
           <tr><td><kbd>B</kbd></td><td>Wheel brakes</td></tr>
+          <tr><td>Left click</td><td>Fire guns</td></tr>
+          <tr><td>Right click</td><td>Toggle gunsight scope</td></tr>
           <tr><td><kbd>Space</kbd></td><td>Release bomb</td></tr>
           <tr><td><kbd>C</kbd></td><td>Chase / cockpit view</td></tr>
-          <tr><td><kbd>M</kbd></td><td>Change map</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Menu</td></tr>
           <tr><td><kbd>R</kbd></td><td>Respawn</td></tr>
         </table>
         <p class="hint">
-          Bank to turn — the nose follows the roll. Below about 50kt the wing stops
-          flying. The green ring is your bomb sight. To land, fly the approach at
-          two&nbsp;white and two&nbsp;red on the PAPI beside the strip, touch down under
-          400&nbsp;fpm, and brake to a stop to rearm.
+          Bank to turn — the nose follows the roll, and the rudder is only for
+          trimming. Below your aircraft's stall speed the wing stops flying. The
+          green ring on the ground is the bomb sight. To land, fly the approach at
+          two white and two red on the PAPI beside the strip, touch down gently,
+          and brake to a stop to rearm.
         </p>
-      </details>
-    </div>
+        <div class="menu-actions">
+          <button class="btn ghost" data-goto="menu">Back</button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script type="module" src="./src/main.js"></script>

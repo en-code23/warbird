@@ -1,0 +1,16 @@
+{
+  "name": "warbird",
+  "version": "0.2.0",
+  "description": "A browser flight simulator in three.js — bombing, gunnery, destructible cities and multiplayer dogfights",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8123",
+    "server": "node server/index.js",
+    "dev": "node server/index.js & python3 -m http.server 8123"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/en-code23/warbird.git" }
+}
