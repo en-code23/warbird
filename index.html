@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bomber Run — Three.js Flight Sim</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./src/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="hud" class="hidden">
+    <div class="hud-corner tl">
+      <div class="gauge"><span class="label">SPD</span><span class="value" id="v-speed">0</span><span class="unit">kt</span></div>
+      <div class="gauge"><span class="label">ALT</span><span class="value" id="v-alt">0</span><span class="unit">ft</span></div>
+      <div class="gauge"><span class="label">V/S</span><span class="value" id="v-vs">0</span><span class="unit">fpm</span></div>
+      <div class="gauge"><span class="label">HDG</span><span class="value" id="v-hdg">000</span><span class="unit">&deg;</span></div>
+    </div>
+
+    <div class="hud-corner tr">
+      <div class="gauge"><span class="label">BOMBS</span><span class="value" id="v-bombs">24</span></div>
+      <div class="gauge"><span class="label">HITS</span><span class="value" id="v-score">0</span></div>
+      <div class="gauge"><span class="label">FIELD</span><span class="value" id="v-field">0</span><span class="unit">m</span></div>
+      <div class="mapname" id="v-map">Midtown</div>
+    </div>
+
+    <div class="hud-corner bl">
+      <div class="throttle">
+        <div class="throttle-label">THR <span id="v-thr">70</span>%</div>
+        <div class="throttle-track"><div class="throttle-fill" id="v-thrbar"></div></div>
+      </div>
+      <div class="warn-row">
+        <div class="warn" id="v-stall">STALL</div>
+        <div class="warn brake" id="v-brake">BRAKE</div>
+      </div>
+    </div>
+
+    <div class="hud-corner br">
+      <div class="keys">
+        <div><b>W/S</b> pitch &nbsp; <b>A/D</b> roll &nbsp; <b>Q/E</b> rudder &nbsp; <b>B</b> brakes</div>
+        <div><b>&uarr;/&darr;</b> throttle &nbsp; <b>SPACE</b> bomb &nbsp; <b>C</b> view &nbsp; <b>M</b> maps &nbsp; <b>R</b> respawn</div>
+      </div>
+    </div>
+
+    <!-- approach guidance, shown only on final -->
+    <div class="approach hidden" id="v-approach">
+      <div class="ap-title">APPROACH</div>
+      <div class="ap-row"><span>DIST</span><b id="v-apdist">—</b></div>
+      <div class="ap-row"><span>G/S</span><b id="v-apgs">—</b></div>
+      <div class="ap-scale">
+        <div class="ap-tick high">HIGH</div>
+        <div class="ap-track"><div class="ap-mark" id="v-apmark"></div><div class="ap-target"></div></div>
+        <div class="ap-tick low">LOW</div>
+      </div>
+    </div>
+
+    <div class="reticle">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="13" />
+        <line x1="50" y1="26" x2="50" y2="36" />
+        <line x1="50" y1="64" x2="50" y2="74" />
+        <line x1="26" y1="50" x2="36" y2="50" />
+        <line x1="64" y1="50" x2="74" y2="50" />
+      </svg>
+    </div>
+
+    <div class="banner" id="v-banner"></div>
+  </div>
+
+  <div id="menu">
+    <div class="panel">
+      <h1>Bomber&nbsp;Run</h1>
+      <p class="sub" id="menu-title">Choose a target</p>
+
+      <div class="maps" id="map-list"></div>
+
+      <details class="ctrl-details">
+        <summary>Controls</summary>
+        <table class="controls">
+          <tr><td><kbd>W</kbd><kbd>S</kbd></td><td>Pitch down / up</td></tr>
+          <tr><td><kbd>A</kbd><kbd>D</kbd></td><td>Roll left / right</td></tr>
+          <tr><td><kbd>Q</kbd><kbd>E</kbd></td><td>Rudder</td></tr>
+          <tr><td><kbd>&uarr;</kbd><kbd>&darr;</kbd></td><td>Throttle</td></tr>
+          <tr><td><kbd>B</kbd></td><td>Wheel brakes</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Release bomb</td></tr>
+          <tr><td><kbd>C</kbd></td><td>Chase / cockpit view</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Change map</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Respawn</td></tr>
+        </table>
+        <p class="hint">
+          Bank to turn — the nose follows the roll. Below about 50kt the wing stops
+          flying. The green ring is your bomb sight. To land, fly the approach at
+          two&nbsp;white and two&nbsp;red on the PAPI beside the strip, touch down under
+          400&nbsp;fpm, and brake to a stop to rearm.
+        </p>
+      </details>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
