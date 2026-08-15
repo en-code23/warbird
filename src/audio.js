@@ -130,6 +130,58 @@ export class Audio {
     sub.stop(t + 1);
   }
 
+  /**
+   * Gunfire. Individual rounds are far too fast to synthesise one at a time, so
+   * this plays a rate-limited impulse whose weight and pitch track the weapon —
+   * a Gatling reads as a saw, a 30mm as slow heavy thumps.
+   * @param {object} gun a GUNS[] entry
+   * @param {number} spin 0..1 spin-up factor
+   */
+  gun(gun, spin = 1) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // one impulse per audible "chug" rather than one per round
+    const interval = Math.max(0.035, 60 / gun.rpm);
+    if (t - (this._lastGun ?? 0) < interval) return;
+    this._lastGun = t;
+
+    const heavy = gun.damage > 20;
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.playbackRate.value = heavy ? 0.5 : 1.1;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = (heavy ? 420 : 1400) * (0.85 + spin * 0.3);
+    filter.Q.value = 0.9;
+
+    const g = ctx.createGain();
+    const peak = (heavy ? 0.3 : 0.14) * (0.5 + spin * 0.5);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + (heavy ? 0.16 : 0.07));
+
+    src.connect(filter).connect(g).connect(this.master);
+    src.start(t);
+    src.stop(t + 0.25);
+
+    if (heavy) {
+      const thump = ctx.createOscillator();
+      thump.type = 'sine';
+      thump.frequency.setValueAtTime(150, t);
+      thump.frequency.exponentialRampToValueAtTime(52, t + 0.1);
+      const tg = ctx.createGain();
+      tg.gain.setValueAtTime(0.2, t);
+      tg.gain.exponentialRampToValueAtTime(0.0005, t + 0.14);
+      thump.connect(tg).connect(this.master);
+      thump.start(t);
+      thump.stop(t + 0.16);
+    }
+  }
+
   /** short mechanical click when a bomb leaves the rack */
   release() {
     if (!this.ready) return;

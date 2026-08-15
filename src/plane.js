@@ -192,13 +192,18 @@ export function createPlane(spec, opts = {}) {
   const wingZ = -s.length * 0.03;
 
   /* ---------- fuselage ---------- */
-  group.add(new THREE.Mesh(fuselage(s.length, radius), bodyMat));
+  // Parts flagged `hideInCockpit` enclose the pilot; the cockpit view hides
+  // them so the camera is not staring at the inside of the hull.
+  const body = new THREE.Mesh(fuselage(s.length, radius), bodyMat);
+  body.userData.hideInCockpit = true;
+  group.add(body);
 
   const belly = new THREE.Mesh(
     new THREE.BoxGeometry(radius * 1.4, 0.18, s.length * 0.7),
     trimMat
   );
   belly.position.set(0, -radius * 0.78, s.length * 0.03);
+  belly.userData.hideInCockpit = true;
   group.add(belly);
 
   /* ---------- wings ---------- */
@@ -230,6 +235,7 @@ export function createPlane(spec, opts = {}) {
     );
     cowl.rotation.x = Math.PI / 2;
     cowl.position.z = noseZ + 0.55;
+    cowl.userData.hideInCockpit = true;
     group.add(cowl);
 
     const prop = propeller(s.span * 0.45, s.spinner);
@@ -304,10 +310,12 @@ export function createPlane(spec, opts = {}) {
   );
   canopy.scale.set(0.95, 0.9, 2.1);
   canopy.position.set(0, radius * 0.62, canopyZ);
+  canopy.userData.hideInCockpit = true;
   group.add(canopy);
 
   const headrest = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.42, 0.3), darkMat);
   headrest.position.set(0, radius * 0.78, canopyZ + s.length * 0.13);
+  headrest.userData.hideInCockpit = true;
   group.add(headrest);
 
   /* ---------- gun mounts ---------- */
@@ -355,17 +363,28 @@ export function createPlane(spec, opts = {}) {
     }
   });
 
+  const hideInCockpit = [];
+  group.traverse((o) => {
+    if (o.isMesh && o.userData.hideInCockpit) hideInCockpit.push(o);
+  });
+
   return {
     group,
     propellers,
     propDiscs,
+    /** meshes that enclose the pilot and must not be drawn from inside */
+    hideInCockpit,
     /** convenience aliases for callers that only care about the main engine */
     propeller: propellers[0] ?? new THREE.Group(),
     propDisc: propDiscs[0] ?? { material: { opacity: 0 } },
     hardpoints,
     muzzles,
-    /** local-space eye point for the cockpit view */
-    eye: new THREE.Vector3(0, radius * 0.62, canopyZ - s.length * 0.02),
+    /**
+     * Local-space eye point. Sat well back under the canopy and high enough to
+     * see over the coaming — putting it further forward buries the camera in
+     * the propeller arc and the instrument shroud.
+     */
+    eye: new THREE.Vector3(0, radius * 1.05, canopyZ + s.length * 0.06),
     dimensions: { length: s.length, span: s.span, radius },
     gearHeight: 0.45 + strut + radius * 0.42,
     /** hull sample points for collision, derived from the actual airframe */

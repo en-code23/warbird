@@ -1,37 +1,37 @@
 import * as THREE from 'three';
 import { createPlane } from './plane.js';
 import { createWorld, disposeWorld } from './world.js';
-import { MapMenu } from './mapselect.js';
+import { ChunkWorld, FREEFLIGHT_ENV } from './chunks.js';
+import { Pedestrians } from './pedestrians.js';
+import { Cockpit } from './cockpit.js';
+import { Weapons } from './weapons.js';
 import { Effects } from './effects.js';
 import { Audio } from './audio.js';
 import { Hud } from './hud.js';
+import { UI } from './ui.js';
+import { Net } from './net.js';
+import { Economy } from './economy.js';
+import { formatClock } from './modes.js';
+import { planeById } from './catalog.js';
 
 /* ==========================================================================
-   Flight model constants (arcade, tuned for feel rather than realism)
-   ========================================================================== */
+   Constants
+   ==========================================================================
+   Per-aircraft figures (speed, thrust, control rates, armour) come from the
+   catalogue. These are the ones that apply to every airframe equally.
+*/
 
-const MAX_SPEED = 168;
-const STALL_SPEED = 42;
-const THRUST = 96;
-const DRAG = 0.0052;
 const GRAVITY = 32;
 const BOMB_GRAVITY = 30;
-
-const PITCH_RATE = 1.15;
-const ROLL_RATE = 2.35;
-const YAW_RATE = 0.55;
-
-const GEAR_HEIGHT = 1.8;
-const CEILING = 900;
-const ARENA = 2400;
-
-const BOMB_LOAD = 24;
-const BLAST_RADIUS = 30;
+const ARENA = 3200;
 
 /** Touchdown limits. Outside these the aircraft is written off. */
 const MAX_SINK = 14;
 const MAX_BANK = 0.35;
-const GLIDESLOPE = 4.0; // degrees, what the PAPI is set to
+const GLIDESLOPE = 4.0;
+
+const SCOPE_FOV = 22;
+const BASE_FOV = 62;
 
 const UP = new THREE.Vector3(0, 1, 0);
 const FWD = new THREE.Vector3(0, 0, -1);
@@ -45,7 +45,9 @@ const DEG = 180 / Math.PI;
    ========================================================================== */
 
 const canvas = document.getElementById('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, powerPreference: 'high-performance'
+});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -55,10 +57,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0xbcd4e2, 0.00052);
+const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.4, 9000);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.6, 8000);
-
-/* ---------- sky dome ---------- */
+/* ---------- sky ---------- */
 
 const skyUniforms = {
   top: { value: new THREE.Color(0x2f6fb0) },
@@ -67,7 +68,7 @@ const skyUniforms = {
 };
 
 const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(4000, 32, 20),
+  new THREE.SphereGeometry(4500, 32, 20),
   new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -78,12 +79,9 @@ const sky = new THREE.Mesh(
       void main() {
         vDir = normalize(position);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
+      }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 top;
-      uniform vec3 horizon;
-      uniform vec3 sun;
+      uniform vec3 top; uniform vec3 horizon; uniform vec3 sun;
       varying vec3 vDir;
       void main() {
         float h = clamp(vDir.y * 1.15 + 0.06, 0.0, 1.0);
@@ -92,8 +90,7 @@ const sky = new THREE.Mesh(
         col += vec3(1.0, 0.86, 0.62) * pow(d, 26.0) * 0.9;
         col += vec3(1.0, 0.88, 0.72) * pow(d, 3.5) * 0.10;
         gl_FragColor = vec4(col, 1.0);
-      }
-    `
+      }`
   })
 );
 sky.frustumCulled = false;
@@ -106,15 +103,12 @@ const sun = new THREE.DirectionalLight(0xfff2dc, 2.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 900;
+sun.shadow.camera.far = 1000;
 sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.6;
 {
   const c = sun.shadow.camera;
-  c.left = -240;
-  c.right = 240;
-  c.top = 240;
-  c.bottom = -240;
+  c.left = -260; c.right = 260; c.top = 260; c.bottom = -260;
   c.updateProjectionMatrix();
 }
 scene.add(sun, sun.target);
@@ -123,27 +117,25 @@ const hemi = new THREE.HemisphereLight(0xbdd7ef, 0x4a5a3a, 1.15);
 const ambient = new THREE.AmbientLight(0xffffff, 0.18);
 scene.add(hemi, ambient);
 
+/* ==========================================================================
+   Services
+   ========================================================================== */
+
 const effects = new Effects(scene);
 const audio = new Audio();
 const hud = new Hud();
-
-/* ---------- aircraft ---------- */
-
-const plane = createPlane();
-scene.add(plane.group);
+const economy = new Economy();
+const net = new Net();
+const weapons = new Weapons(scene, effects, audio);
 
 /* ---------- bomb sight ---------- */
 
 const sight = new THREE.Mesh(
   new THREE.RingGeometry(4.2, 5.4, 32),
   new THREE.MeshBasicMaterial({
-    color: 0x8ef2c4,
-    transparent: true,
-    opacity: 0.8,
-    depthWrite: false,
-    depthTest: false,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending
+    color: 0x8ef2c4, transparent: true, opacity: 0.8,
+    depthWrite: false, depthTest: false,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending
   })
 );
 sight.rotation.x = -Math.PI / 2;
@@ -151,52 +143,83 @@ sight.renderOrder = 5;
 scene.add(sight);
 
 /* ==========================================================================
-   Bombs
+   Session + flight state
    ========================================================================== */
 
-function bombPrototype() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.34, 1.15, 4, 10),
-    new THREE.MeshStandardMaterial({ color: 0x3d4247, roughness: 0.5, metalness: 0.5 })
-  );
-  body.rotation.x = Math.PI / 2;
-  g.add(body);
+const state = {
+  speed: 0,
+  throttle: 0.7,
+  velocity: new THREE.Vector3(),
+  hp: 100,
+  maxHp: 100,
+  alive: true,
+  grounded: true,
+  cockpit: false,
+  scoped: false,
+  braking: false,
+  shake: 0,
+  wreck: null,
+  outOfArea: 0,
+  touchdown: null,
+  lastHitBy: null,
+  pitchIn: 0,
+  rollIn: 0
+};
 
-  const nose = new THREE.Mesh(
-    new THREE.ConeGeometry(0.34, 0.5, 10),
-    new THREE.MeshStandardMaterial({ color: 0xc4b03a, roughness: 0.5, metalness: 0.3 })
-  );
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.z = -1.15;
-  g.add(nose);
-
-  const finMat = new THREE.MeshStandardMaterial({ color: 0x2a2e31, roughness: 0.7 });
-  for (let i = 0; i < 4; i++) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.55, 0.55), finMat);
-    fin.position.set(0, 0.36, 1.0);
-    const pivot = new THREE.Group();
-    pivot.add(fin);
-    pivot.rotation.z = (i / 4) * Math.PI * 2;
-    g.add(pivot);
-  }
-  g.visible = false;
-  return g;
-}
-
-const bombProto = bombPrototype();
-const bombs = Array.from({ length: 30 }, () => {
-  const mesh = bombProto.clone(true);
-  scene.add(mesh);
-  return { mesh, vel: new THREE.Vector3(), live: false, t: 0 };
-});
-
-/* ==========================================================================
-   World / map loading
-   ========================================================================== */
+const session = {
+  mode: null,
+  map: null,
+  room: null,
+  duration: 0,
+  timeLeft: 0,
+  score: 0,
+  buildings: 0,
+  peds: 0,
+  kills: 0,
+  deaths: 0,
+  landings: 0,
+  running: false
+};
 
 let world = null;
 let runway = null;
+let pedestrians = null;
+let plane = null;
+let cockpit = null;
+let planeSpec = planeById(economy.data.loadout.plane);
+
+/* ==========================================================================
+   Aircraft construction
+   ========================================================================== */
+
+/** Rebuilds the player's aircraft from the equipped loadout. */
+function buildAircraft() {
+  if (plane) {
+    cockpit?.dispose();
+    plane.group.traverse((o) => {
+      if (o.isMesh) {
+        o.geometry?.dispose();
+        if (o.material && !Array.isArray(o.material)) o.material.dispose();
+      }
+    });
+    plane.group.removeFromParent();
+  }
+
+  planeSpec = economy.loadout.plane;
+  plane = createPlane(planeSpec.model, { guns: planeSpec.guns });
+  scene.add(plane.group);
+  cockpit = new Cockpit(plane.group, plane.dimensions, plane.eye);
+  cockpit.visible = state.cockpit;
+
+  state.maxHp = planeSpec.armour;
+  state.hp = planeSpec.armour;
+
+  weapons.setLoadout(economy.loadout);
+}
+
+/* ==========================================================================
+   Environment
+   ========================================================================== */
 
 function applyEnv(env) {
   skyUniforms.top.value.setHex(env.skyTop);
@@ -216,69 +239,99 @@ function applyEnv(env) {
   renderer.toneMappingExposure = env.exposure;
 }
 
-function loadMap(map) {
-  disposeWorld(world);
-  world = createWorld(map);
-  runway = world.runway;
-  scene.add(world.group);
-  applyEnv(map.env);
-
+function teardownWorld() {
+  pedestrians?.dispose();
+  pedestrians = null;
+  if (world?.dispose) world.dispose();
+  else if (world) disposeWorld(world);
+  world = null;
   burning.length = 0;
+  fires.length = 0;
+  weapons.reset();
   effects.reset();
-  state.score = 0;
+  clearRemotes();
+}
+
+/* ==========================================================================
+   Launching a sortie
+   ========================================================================== */
+
+function launch({ mode, map, duration, room }) {
+  teardownWorld();
+  buildAircraft();
+
+  session.mode = mode;
+  session.map = map;
+  session.duration = duration ?? 0;
+  session.timeLeft = duration ?? 0;
+  session.score = 0;
+  session.buildings = 0;
+  session.peds = 0;
+  session.kills = 0;
+  session.deaths = 0;
+  session.landings = 0;
+  session.running = true;
+  session.room = room ?? null;
+
+  if (mode.infinite) {
+    world = new ChunkWorld(scene);
+    world.update(new THREE.Vector3());
+    applyEnv(FREEFLIGHT_ENV);
+  } else {
+    world = createWorld(map);
+    scene.add(world.group);
+    applyEnv(map.env);
+  }
+  runway = world.runway;
+
+  // crowds only exist where there are streets to walk
+  if (world.streets) {
+    pedestrians = new Pedestrians(scene, {
+      count: mode.infinite ? 120 : 260,
+      grid: world.streets.grid,
+      cell: world.streets.cell,
+      half: world.streets.half,
+      road: world.streets.road,
+      effects
+    });
+  }
+
   resetPlane();
+  hud.show();
+  hud.setMode(mode);
+  running = true;
+  last = performance.now();
+  audio.start();
+  audio.resume();
 
   hud.banner(
-    `${map.name.toUpperCase()}<small>${map.difficulty} — cleared for takeoff</small>`,
+    `${(map?.name ?? 'Free Flight').toUpperCase()}<small>${planeSpec.name} · ${economy.loadout.gun.name} · ${economy.loadout.bomb.name}</small>`,
     'good',
     3
   );
 }
 
-/* ==========================================================================
-   Flight state
-   ========================================================================== */
-
-const state = {
-  speed: 0,
-  throttle: 0.7,
-  velocity: new THREE.Vector3(),
-  bombs: BOMB_LOAD,
-  score: 0,
-  alive: true,
-  grounded: true,
-  cockpit: false,
-  braking: false,
-  shake: 0,
-  wreck: null,
-  outOfArea: 0,
-  /** set on touchdown, cleared when the wheels leave the ground */
-  touchdown: null
-};
-
 function resetPlane() {
   const g = plane.group;
   g.position.copy(runway.start);
-  g.position.y = runway.deck + GEAR_HEIGHT;
-  // face down the runway
+  g.position.y = runway.deck + plane.gearHeight;
   g.quaternion.setFromAxisAngle(UP, Math.atan2(-runway.forward.x, -runway.forward.z));
   g.visible = true;
 
   state.speed = 0;
   state.throttle = 0.7;
   state.velocity.set(0, 0, 0);
-  state.bombs = BOMB_LOAD;
+  state.hp = state.maxHp;
   state.alive = true;
   state.grounded = true;
   state.shake = 0;
   state.wreck = null;
   state.outOfArea = 0;
   state.touchdown = null;
+  state.lastHitBy = null;
 
-  for (const b of bombs) {
-    b.live = false;
-    b.mesh.visible = false;
-  }
+  weapons.rearm();
+  weapons.reset();
   hud.clearBanner();
 }
 
@@ -297,154 +350,196 @@ addEventListener('keydown', (e) => {
   if (e.repeat) return;
   keys[e.code] = true;
 
-  if (menu.open) {
-    // reopening the menu by accident shouldn't strand you in it
+  if (ui.visible) {
     if ((e.code === 'KeyM' || e.code === 'Escape') && world) resumeFromMenu();
     return;
   }
-  if (e.code === 'KeyC') state.cockpit = !state.cockpit;
+  if (e.code === 'KeyC') setCockpit(!state.cockpit);
   if (e.code === 'KeyR') respawn();
   if (e.code === 'Space') dropBomb();
-  if (e.code === 'KeyM') openMenu();
+  if (e.code === 'KeyM' || e.code === 'Escape') openMenu();
 });
+
 addEventListener('keyup', (e) => {
   keys[e.code] = false;
 });
+
 addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
+  weapons.trigger = false;
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('mousedown', (e) => {
+  if (ui.visible) return;
+  if (e.button === 0) weapons.trigger = true;
+  if (e.button === 2) setScoped(!state.scoped);
+});
+
+addEventListener('mouseup', (e) => {
+  if (e.button === 0) weapons.trigger = false;
 });
 
 const axis = (neg, pos) => (keys[pos] ? 1 : 0) - (keys[neg] ? 1 : 0);
 
+function setScoped(on) {
+  state.scoped = on;
+  hud.setScoped(on);
+}
+
+function setCockpit(on) {
+  state.cockpit = on;
+  if (cockpit) cockpit.visible = on;
+  // From inside, the solid propeller blades sweep across the whole view as
+  // black bars. Real cockpit views see a translucent disc, so show only that.
+  for (const prop of plane.propellers) prop.visible = !on;
+  for (const mesh of plane.hideInCockpit) mesh.visible = !on;
+}
+
 /* ==========================================================================
-   Bombing
+   Scoring
    ========================================================================== */
 
-const _v = new THREE.Vector3();
-const _n = new THREE.Vector3();
-const TRAIL_FROM = new THREE.Color(0xffffff);
-const TRAIL_TO = new THREE.Color(0xbfbfbf);
-
-let rackIndex = 0;
-
-function dropBomb() {
-  if (!state.alive || state.bombs <= 0) return;
-  const slot = bombs.find((b) => !b.live);
-  if (!slot) return;
-
-  const hp = plane.hardpoints[rackIndex++ % plane.hardpoints.length];
-  slot.mesh.position.copy(hp).applyMatrix4(plane.group.matrixWorld);
-  slot.vel.copy(state.velocity);
-  slot.vel.y -= 2;
-  slot.live = true;
-  slot.t = 0;
-  slot.mesh.visible = true;
-
-  state.bombs--;
-  audio.release();
-}
-
-function updateBombs(dt) {
-  for (const b of bombs) {
-    if (!b.live) continue;
-    b.t += dt;
-
-    b.vel.y -= BOMB_GRAVITY * dt;
-    b.vel.multiplyScalar(1 - 0.09 * dt);
-    b.mesh.position.addScaledVector(b.vel, dt);
-
-    _n.copy(b.vel).normalize();
-    if (_n.lengthSq() > 0.001) b.mesh.quaternion.setFromUnitVectors(FWD, _n);
-
-    if (b.t > 0.25 && Math.random() < 0.35) {
-      effects.puff(b.mesh.position, {
-        r0: 0.6, r1: 3.5, life: 0.8, opacity: 0.18,
-        from: TRAIL_FROM, to: TRAIL_TO
-      });
-    }
-
-    let hit = null;
-    if (b.mesh.position.y <= 0.4) {
-      hit = _v.set(b.mesh.position.x, 0.4, b.mesh.position.z);
-    } else if (buildingAt(b.mesh.position, 0) || hazardAt(b.mesh.position)) {
-      hit = _v.copy(b.mesh.position);
-    }
-
-    if (hit || b.t > 30) {
-      b.live = false;
-      b.mesh.visible = false;
-      if (hit) detonate(hit);
-    }
+function award(kind, n = 1) {
+  const points = (session.mode.scoring[kind] ?? 0) * n;
+  if (points) {
+    session.score += points;
+    hud.coinPop(`+${points}`);
+    if (session.room) net.send({ t: 'score', n: points });
   }
+  if (kind === 'building') session.buildings += n;
+  if (kind === 'pedestrian') session.peds += n;
+  if (kind === 'kill') session.kills += n;
 }
 
-function detonate(pos) {
-  effects.explode(pos, { radius: 13, debris: 30, smoke: 16 });
-  audio.boom(0.75);
-
-  const d = plane.group.position.distanceTo(pos);
-  state.shake = Math.max(state.shake, clamp(90 / (d + 12), 0, 1.1));
-
-  for (const bld of world.buildings) {
-    if (!bld.alive) continue;
-    const dx = Math.max(bld.min.x - pos.x, 0, pos.x - bld.max.x);
-    const dz = Math.max(bld.min.z - pos.z, 0, pos.z - bld.max.z);
-    if (dx * dx + dz * dz > BLAST_RADIUS * BLAST_RADIUS) continue;
-    if (pos.y > bld.max.y + BLAST_RADIUS * 0.7) continue;
-    demolish(bld);
-  }
-
-  if (state.alive && d < 22) crash('CAUGHT IN YOUR OWN BLAST');
-}
+/* ==========================================================================
+   Ordnance
+   ========================================================================== */
 
 const burning = [];
+const fires = [];
+const _v = new THREE.Vector3();
+const _n = new THREE.Vector3();
+const _hull = new THREE.Vector3();
+const _euler = new THREE.Euler();
 
-function demolish(bld) {
-  bld.alive = false;
-  bld.collapse = 0.0001;
-  state.score++;
-
-  const p = bld.center;
-  effects.explode(_n.set(p.x, bld.min.y + Math.min(bld.height * 0.6, 30), p.z), {
-    radius: 10 + Math.min(bld.height, 40) * 0.28,
-    debris: 16,
-    smoke: 10
+function dropBomb() {
+  if (!state.alive) return;
+  weapons.dropBomb({
+    matrix: plane.group.matrixWorld,
+    hardpoints: plane.hardpoints,
+    velocity: state.velocity
   });
+}
 
-  if (burning.length < 16) burning.push({ bld, t: 0 });
+/** A bomb has reached the ground or a structure. */
+function detonate(pos, spec) {
+  effects.explode(pos, {
+    radius: spec.blast * 0.45,
+    debris: 20 + Math.round(spec.blast * 0.6),
+    smoke: 12 + Math.round(spec.blast * 0.35)
+  });
+  audio.boom(0.5 + spec.blast / 60);
+
+  const d = plane.group.position.distanceTo(pos);
+  state.shake = Math.max(state.shake, clamp(120 / (d + 14), 0, 1.2));
+
+  for (const b of world.buildings) {
+    if (!b.alive) continue;
+    const dx = Math.max(b.min.x - pos.x, 0, pos.x - b.max.x);
+    const dz = Math.max(b.min.z - pos.z, 0, pos.z - b.max.z);
+    if (dx * dx + dz * dz > spec.blast * spec.blast) continue;
+    if (pos.y > b.max.y + spec.blast * 0.7) continue;
+    demolish(b);
+  }
+
+  if (pedestrians) {
+    const killed = pedestrians.blast(pos, spec.blast * 1.15);
+    if (killed) award('pedestrian', killed);
+  }
+
+  // incendiaries keep taking neighbours for a while after the hit
+  if (spec.incendiary) {
+    fires.push({ pos: pos.clone(), spec, wave: 0, t: 0, radius: spec.blast });
+  }
+
+  if (state.alive && d < spec.blast * 0.75) {
+    damage(spec.damage * (1 - d / (spec.blast * 0.75)), null, 'CAUGHT IN YOUR OWN BLAST');
+  }
+}
+
+function updateFires(dt) {
+  for (let i = fires.length - 1; i >= 0; i--) {
+    const f = fires[i];
+    f.t += dt;
+    if (f.t < f.spec.incendiary.interval) continue;
+    f.t = 0;
+    if (++f.wave > f.spec.incendiary.waves) {
+      fires.splice(i, 1);
+      continue;
+    }
+    f.radius += f.spec.incendiary.spread / f.spec.incendiary.waves;
+
+    for (const b of world.buildings) {
+      if (!b.alive) continue;
+      const dx = b.center.x - f.pos.x;
+      const dz = b.center.z - f.pos.z;
+      if (dx * dx + dz * dz > f.radius * f.radius) continue;
+      if (Math.random() < 0.45) demolish(b);
+    }
+  }
+}
+
+function demolish(b) {
+  if (!b.alive) return;
+  b.alive = false;
+  b.collapse = 0.0001;
+  award('building');
+
+  const p = b.center;
+  effects.explode(_n.set(p.x, b.min.y + Math.min(b.height * 0.6, 30), p.z), {
+    radius: 9 + Math.min(b.height, 40) * 0.26,
+    debris: 14,
+    smoke: 9
+  });
+  pedestrians?.scare(p, 90);
+  if (burning.length < 18) burning.push({ bld: b, t: 0 });
 }
 
 function updateCollapses(dt) {
-  for (const bld of world.buildings) {
-    if (bld.collapse <= 0 || bld.collapse >= 1) continue;
-    bld.collapse = Math.min(1, bld.collapse + dt * 0.85);
-    const k = bld.collapse;
+  for (const b of world.buildings) {
+    if (b.collapse <= 0 || b.collapse >= 1) continue;
+    b.collapse = Math.min(1, b.collapse + dt * 0.85);
+    const k = b.collapse;
     const s = 1 - 0.88 * (k * k * (3 - 2 * k)); // smoothstep
-    const base = bld.min.y;
+    const base = b.min.y;
 
-    bld.mesh.scale.y = s;
-    bld.mesh.rotation.z = Math.sin(k * 4) * 0.035 * (1 - k);
-    bld.roof.position.y = base + bld.height * s;
-    bld.roof.scale.setScalar(1 - 0.25 * k);
-    bld.max.y = base + bld.height * s;
+    b.mesh.scale.y = s;
+    // it leans as it goes rather than sinking straight down
+    b.mesh.rotation.z = Math.sin(k * 4) * 0.05 * (1 - k);
+    b.mesh.rotation.x = Math.cos(k * 3.3) * 0.04 * (1 - k);
+    b.roof.position.y = base + b.height * s;
+    b.roof.scale.setScalar(1 - 0.25 * k);
+    b.max.y = base + b.height * s;
 
-    if (bld.extras) for (const e of bld.extras) e.position.y = base + bld.height * s + 6;
+    if (b.extras) for (const e of b.extras) e.position.y = base + b.height * s + 6;
 
-    if (Math.random() < 12 * dt) {
+    if (Math.random() < 14 * dt) {
       effects.puff(
         _v.set(
-          bld.center.x + (Math.random() - 0.5) * bld.size.x,
-          base + Math.random() * bld.height * s,
-          bld.center.z + (Math.random() - 0.5) * bld.size.z
+          b.center.x + (Math.random() - 0.5) * b.size.x * 1.3,
+          base + Math.random() * b.height * s,
+          b.center.z + (Math.random() - 0.5) * b.size.z * 1.3
         ),
-        { r0: 3, r1: 16, life: 2.4, opacity: 0.4 }
+        { r0: 3, r1: 18, life: 2.6, opacity: 0.42 }
       );
     }
 
-    if (bld.collapse >= 1) {
-      bld.mesh.material.color.multiplyScalar(0.45);
-      bld.roof.visible = false;
-      if (bld.extras) for (const e of bld.extras) e.visible = false;
+    if (b.collapse >= 1) {
+      b.mesh.material.color.multiplyScalar(0.45);
+      b.roof.visible = false;
+      if (b.extras) for (const e of b.extras) e.visible = false;
     }
   }
 
@@ -458,7 +553,7 @@ function updateCollapses(dt) {
     effects.burn(
       _v.set(
         f.bld.center.x + (Math.random() - 0.5) * f.bld.size.x * 0.6,
-        f.bld.min.y + 2 + Math.random() * 4,
+        (f.bld.min?.y ?? 0) + 2 + Math.random() * 4,
         f.bld.center.z + (Math.random() - 0.5) * f.bld.size.z * 0.6
       ),
       dt * 6 * (1 - f.t / 26)
@@ -466,42 +561,25 @@ function updateCollapses(dt) {
   }
 }
 
-/** Destructible box containing `p`, grown by `pad`. */
-function buildingAt(p, pad = 0) {
-  for (const b of world.buildings) {
-    if (!b.alive) continue;
-    if (
-      p.x > b.min.x - pad && p.x < b.max.x + pad &&
-      p.z > b.min.z - pad && p.z < b.max.z + pad &&
-      p.y > b.min.y - pad && p.y < b.max.y + pad
-    ) {
-      return b;
-    }
-  }
-  return null;
-}
-
-/** Indestructible terrain (buttes are cylinders, peaks are cones). */
-function hazardAt(p) {
-  for (const h of world.hazards) {
-    if (p.y > h.h || p.y < 0) continue;
-    const r = h.cone ? h.r * (1 - p.y / h.h) : h.r;
-    const dx = p.x - h.x;
-    const dz = p.z - h.z;
-    if (dx * dx + dz * dz < r * r) return h;
-  }
-  return null;
-}
-
 /* ==========================================================================
-   Crash / landing / respawn
+   Damage, crashing, landing
    ========================================================================== */
+
+function damage(amount, fromId, reason) {
+  if (!state.alive) return;
+  state.hp -= amount;
+  if (fromId) state.lastHitBy = fromId;
+  state.shake = Math.max(state.shake, Math.min(0.7, amount / 60));
+  hud.flashDamage();
+  if (state.hp <= 0) crash(reason ?? 'SHOT DOWN');
+}
 
 function crash(reason) {
   if (!state.alive) return;
   state.alive = false;
   state.grounded = false;
   state.touchdown = null;
+  session.deaths++;
 
   const p = plane.group.position.clone();
   p.y = Math.max(p.y, 1);
@@ -515,13 +593,19 @@ function crash(reason) {
   });
 
   plane.group.visible = false;
-  hud.banner(`CRASHED<small>${reason} — press R to respawn</small>`, 'bad', 999);
+  if (cockpit) cockpit.visible = false;
+  if (session.room) net.reportDeath(state.lastHitBy);
+
+  hud.banner(`DOWN<small>${reason} — press R to respawn</small>`, 'bad', 999);
 }
 
-/**
- * Grades a touchdown. Anything outside the structural limits is a crash and
- * never reaches here; this only decides how good a survivable arrival was.
- */
+function respawn() {
+  if (!world) return;
+  resetPlane();
+  setCockpit(state.cockpit);
+  hud.banner('CLEARED FOR TAKEOFF', 'good', 1.6);
+}
+
 function gradeTouchdown(sinkRate, alignment, onStrip) {
   if (!onStrip) return { grade: 'OFF FIELD', bonus: 0, note: 'you are not on the strip' };
   if (alignment < 0.9) return { grade: 'OFF HEADING', bonus: 1, note: 'line up with the runway' };
@@ -535,47 +619,34 @@ function gradeTouchdown(sinkRate, alignment, onStrip) {
 function completeLanding() {
   const td = state.touchdown;
   td.scored = true;
-  state.score += td.bonus;
-  const rearmed = state.bombs < BOMB_LOAD;
-  state.bombs = BOMB_LOAD;
+  session.landings++;
+  award('landing');
+  economy.record('landings');
+
+  const rearmed = weapons.bombs < weapons.maxBombs || weapons.ammo < weapons.maxAmmo;
+  weapons.rearm();
+  // patched up while you are on the ground
+  state.hp = Math.min(state.maxHp, state.hp + state.maxHp * 0.35);
+
   hud.banner(
     `LANDED · ${td.grade}<small>+${td.bonus} &nbsp;·&nbsp; ${Math.round(td.sink * 196.85)} fpm${rearmed ? ' &nbsp;·&nbsp; rearmed' : ''}</small>`,
     'good',
-    3.4
+    3.2
   );
 }
 
-function respawn() {
-  resetPlane();
-  hud.banner('CLEARED FOR TAKEOFF', 'good', 1.8);
-}
-
 /* ==========================================================================
-   Flight update
+   Flight
    ========================================================================== */
 
 const fwd = new THREE.Vector3();
 const up = new THREE.Vector3();
 const right = new THREE.Vector3();
 
-const _hull = new THREE.Vector3();
-const _euler = new THREE.Euler();
-const HULL_POINTS = [
-  new THREE.Vector3(0, 0, -3.4),
-  new THREE.Vector3(0, 0, 0),
-  new THREE.Vector3(0, 0, 4.8),
-  new THREE.Vector3(-5.4, 0, -0.2),
-  new THREE.Vector3(5.4, 0, -0.2)
-];
-
-/** Surface height under a point — the causeway deck sits above ground level. */
-function groundHeightAt(p) {
-  return world.surfaceAt(p).y;
-}
-
 function updateFlight(dt) {
   const g = plane.group;
   const q = g.quaternion;
+  const P = planeSpec;
 
   fwd.copy(FWD).applyQuaternion(q);
   up.copy(UP).applyQuaternion(q);
@@ -585,33 +656,36 @@ function updateFlight(dt) {
   state.braking = !!keys.KeyB && state.grounded;
 
   // --- longitudinal ---
-  const thrust = state.throttle * THRUST;
-  const drag = DRAG * state.speed * state.speed;
-  const slope = -GRAVITY * fwd.y * 0.85;
-  state.speed = clamp(state.speed + (thrust - drag + slope) * dt, 0, MAX_SPEED);
+  const thrust = state.throttle * P.thrust;
+  const drag = P.drag * state.speed * state.speed;
+  const slope = -GRAVITY * fwd.y * 0.85; // climbing bleeds speed, diving builds it
+  state.speed = clamp(state.speed + (thrust - drag + slope) * dt, 0, P.maxSpeed);
 
-  // --- control surfaces (authority falls off with airspeed) ---
-  const auth = clamp(state.speed / STALL_SPEED, 0, 1.25);
+  // --- controls: W/S pitch, Q/E roll, A/D rudder ---
+  const auth = clamp(state.speed / P.stall, 0, 1.25);
   const pitch = axis('KeyW', 'KeyS');
-  const roll = axis('KeyD', 'KeyA');
-  const yaw = axis('KeyE', 'KeyQ');
+  const roll = axis('KeyE', 'KeyQ');
+  const yaw = axis('KeyD', 'KeyA');
+  state.pitchIn = pitch;
+  state.rollIn = roll;
 
   if (state.grounded) {
     g.rotateY(yaw * 0.5 * clamp(state.speed / 30, 0, 1) * dt);
-    if (pitch > 0 && state.speed > STALL_SPEED * 0.82) g.rotateX(pitch * 0.7 * dt);
+    if (pitch > 0 && state.speed > P.stall * 0.82) g.rotateX(pitch * 0.7 * dt);
     levelOut(g, dt, 3.2);
   } else {
-    g.rotateX(pitch * PITCH_RATE * auth * dt);
-    g.rotateZ(roll * ROLL_RATE * auth * dt);
-    g.rotateY(yaw * YAW_RATE * auth * dt);
+    g.rotateX(pitch * P.pitch * auth * dt);
+    g.rotateZ(roll * P.roll * auth * dt);
+    g.rotateY(yaw * P.yaw * auth * dt);
 
+    // banked turn: the lift vector's horizontal component swings the nose round
     const bank = Math.asin(clamp(-right.y, -1, 1));
     const turn = -Math.tan(clamp(bank, -1.2, 1.2)) * (GRAVITY / Math.max(state.speed, 34));
     g.rotateOnWorldAxis(UP, turn * dt);
   }
 
   // --- lift / sink ---
-  const liftFactor = Math.min(1, (state.speed / STALL_SPEED) ** 2);
+  const liftFactor = Math.min(1, (state.speed / P.stall) ** 2);
   const support = liftFactor * Math.max(0, up.y);
   const sink = clamp(GRAVITY * (1 - support) * 0.8, 0, 34);
 
@@ -620,15 +694,16 @@ function updateFlight(dt) {
 
   g.position.addScaledVector(state.velocity, dt);
 
-  if (g.position.y > CEILING) {
-    g.position.y = CEILING;
+  if (g.position.y > P.ceiling) {
+    g.position.y = P.ceiling;
     state.speed *= 1 - 0.6 * dt;
   }
 
   // --- ground contact ---
   const surface = world.surfaceAt(g.position);
   const deck = surface.y;
-  if (g.position.y <= deck + GEAR_HEIGHT) {
+  const gear = plane.gearHeight;
+  if (g.position.y <= deck + gear) {
     if (surface.water) {
       crash('DITCHED IN THE WATER');
       return;
@@ -640,7 +715,7 @@ function updateFlight(dt) {
       sinkRate < MAX_SINK && bankAbs < MAX_BANK && noseAngle > -0.12 && noseAngle < 0.42;
 
     if (!survivable) {
-      g.position.y = deck + GEAR_HEIGHT;
+      g.position.y = deck + gear;
       crash(
         sinkRate >= MAX_SINK ? 'FLEW INTO THE GROUND'
           : bankAbs >= MAX_BANK ? 'DUG A WINGTIP IN'
@@ -650,7 +725,7 @@ function updateFlight(dt) {
     }
 
     const wasAirborne = !state.grounded;
-    g.position.y = deck + GEAR_HEIGHT;
+    g.position.y = deck + gear;
     state.grounded = true;
     state.velocity.y = 0;
 
@@ -661,58 +736,70 @@ function updateFlight(dt) {
       state.touchdown = { ...result, sink: sinkRate, scored: false };
 
       effects.puff(g.position, { r0: 1.5, r1: 9, life: 1.1, opacity: 0.4 });
-      effects.puff(g.position, { r0: 1.5, r1: 7, life: 0.9, opacity: 0.3 });
       state.shake = Math.max(state.shake, clamp(sinkRate / 26, 0, 0.5));
       hud.banner(
         `TOUCHDOWN · ${result.grade}<small>${Math.round(sinkRate * 196.85)} fpm — brake to a stop${result.note ? ` · ${result.note}` : ''}</small>`,
         'good',
-        2.6
+        2.4
       );
     }
 
-    // rolling friction, brakes, and the throttle held closed
     const brake = state.braking ? 30 : state.throttle < 0.1 ? 12 : 3;
     state.speed = Math.max(0, state.speed - brake * dt);
 
     if (state.speed < 4) {
       if (state.touchdown && !state.touchdown.scored) {
         completeLanding();
-      } else if (!state.touchdown && runway.contains(g.position) && state.bombs < BOMB_LOAD) {
-        state.bombs = BOMB_LOAD;
-        hud.banner('REARMED', 'good', 1.6);
+      } else if (
+        !state.touchdown && runway.contains(g.position) &&
+        (weapons.bombs < weapons.maxBombs || weapons.ammo < weapons.maxAmmo)
+      ) {
+        weapons.rearm();
+        hud.banner('REARMED', 'good', 1.4);
       }
     }
-  } else if (state.grounded && g.position.y > deck + GEAR_HEIGHT + 0.05) {
+  } else if (state.grounded && g.position.y > deck + gear + 0.05) {
     state.grounded = false;
-    state.touchdown = null; // airborne again: the next arrival is graded fresh
+    state.touchdown = null;
   }
 
   // --- structures and terrain ---
   g.updateMatrixWorld(true);
-  for (const local of HULL_POINTS) {
+  for (const local of plane.hull) {
     _hull.copy(local).applyMatrix4(g.matrixWorld);
-    const struck = buildingAt(_hull, 1.2);
+    const struck = world.buildingAt(_hull, 1.2);
     if (struck) {
       demolish(struck);
       crash('HIT A BUILDING');
       return;
     }
-    if (hazardAt(_hull)) {
-      crash(world.map.mountains ? 'FLEW INTO A MOUNTAIN' : 'FLEW INTO A BUTTE');
+    if (world.hazardAt(_hull)) {
+      crash('FLEW INTO TERRAIN');
       return;
     }
   }
 
-  // --- arena bounds ---
-  const outside = Math.abs(g.position.x) > ARENA || Math.abs(g.position.z) > ARENA;
-  state.outOfArea = outside ? state.outOfArea + dt : 0;
-  if (outside && state.outOfArea > 0.2 && state.outOfArea < 0.4) {
-    hud.banner('TURN BACK<small>leaving the operating area</small>', 'bad', 2.4);
+  // --- ramming another aircraft takes you both out ---
+  for (const r of remotes.values()) {
+    if (!r.alive) continue;
+    if (g.position.distanceTo(r.group.position) < 7) {
+      net.reportHit(r.id, 9999);
+      crash('MID-AIR COLLISION');
+      return;
+    }
   }
-  if (state.outOfArea > 12) crash('LOST OVER OPEN COUNTRY');
+
+  // --- arena bounds (free flight has none) ---
+  if (session.mode.bounded) {
+    const outside = Math.abs(g.position.x) > ARENA || Math.abs(g.position.z) > ARENA;
+    state.outOfArea = outside ? state.outOfArea + dt : 0;
+    if (outside && state.outOfArea > 0.2 && state.outOfArea < 0.4) {
+      hud.banner('TURN BACK<small>leaving the operating area</small>', 'bad', 2.2);
+    }
+    if (state.outOfArea > 12) crash('LOST OVER OPEN COUNTRY');
+  }
 }
 
-/** Wheels-on-tarmac: bleed roll and pitch back to level. */
 function levelOut(g, dt, rate) {
   _euler.setFromQuaternion(g.quaternion, 'YXZ');
   const k = Math.min(1, rate * dt);
@@ -725,20 +812,17 @@ function levelOut(g, dt, rate) {
    Approach guidance
    ========================================================================== */
 
-/**
- * Geometry of the current approach relative to the touchdown zone.
- * `along` is negative while the aircraft is still short of the aim point.
- */
 function approachInfo() {
   const p = plane.group.position;
   const td = runway.touchdown;
   const dx = p.x - td.x;
   const dz = p.z - td.z;
+  const dist = Math.hypot(dx, dz);
   return {
-    distance: Math.hypot(dx, dz),
+    distance: dist,
     along: dx * runway.forward.x + dz * runway.forward.z,
     height: p.y - td.y,
-    angle: Math.atan2(p.y - td.y, Math.max(Math.hypot(dx, dz), 1)) * DEG,
+    angle: Math.atan2(p.y - td.y, Math.max(dist, 1)) * DEG,
     target: GLIDESLOPE
   };
 }
@@ -752,13 +836,9 @@ function updatePAPI(info) {
   }
 }
 
-/* ==========================================================================
-   Bomb sight
-   ========================================================================== */
-
 function updateSight() {
   const p = plane.group.position;
-  if (!state.alive || state.grounded || p.y < 6) {
+  if (!state.alive || state.grounded || p.y < 6 || state.scoped) {
     sight.visible = false;
     return;
   }
@@ -768,6 +848,71 @@ function updateSight() {
   sight.position.set(p.x + state.velocity.x * t, 0.9, p.z + state.velocity.z * t);
   sight.scale.setScalar(clamp(p.y / 90, 0.6, 4));
   sight.material.opacity = 0.35 + 0.45 * Math.abs(Math.sin(performance.now() * 0.004));
+}
+
+/* ==========================================================================
+   Remote aircraft (multiplayer)
+   ========================================================================== */
+
+const remotes = new Map();
+
+function syncRemotes(dt) {
+  if (!session.room) return;
+
+  for (const [id, p] of net.players) {
+    let r = remotes.get(id);
+    if (!r) {
+      const spec = planeById(p.plane ?? 'falcon');
+      const model = createPlane(spec.model, { guns: spec.guns });
+      scene.add(model.group);
+      r = {
+        id, model, group: model.group, name: p.name, alive: true,
+        target: new THREE.Vector3(),
+        targetQ: new THREE.Quaternion()
+      };
+      remotes.set(id, r);
+    }
+    if (p.p) r.target.set(p.p[0], p.p[1], p.p[2]);
+    if (p.q) r.targetQ.set(p.q[0], p.q[1], p.q[2], p.q[3]);
+    r.alive = p.alive !== 0;
+    r.group.visible = r.alive;
+
+    // interpolate toward the last received state rather than snapping
+    r.group.position.lerp(r.target, Math.min(1, 10 * dt));
+    r.group.quaternion.slerp(r.targetQ, Math.min(1, 10 * dt));
+    for (const prop of r.model.propellers) prop.rotation.z += 40 * dt;
+  }
+
+  for (const [id, r] of remotes) {
+    if (!net.players.has(id)) {
+      disposeRemote(r);
+      remotes.delete(id);
+    }
+  }
+}
+
+function disposeRemote(r) {
+  r.group.traverse((o) => {
+    if (o.isMesh) {
+      o.geometry?.dispose();
+      if (o.material && !Array.isArray(o.material)) o.material.dispose();
+    }
+  });
+  r.group.removeFromParent();
+}
+
+function clearRemotes() {
+  for (const r of remotes.values()) disposeRemote(r);
+  remotes.clear();
+}
+
+/** Aircraft the guns can hit: everyone else in the room. */
+function gunTargets() {
+  const list = [];
+  for (const r of remotes.values()) {
+    if (r.alive) list.push({ id: r.id, position: r.group.position, radius: 6, alive: true });
+  }
+  return list;
 }
 
 /* ==========================================================================
@@ -787,26 +932,35 @@ function updateCamera(dt) {
     camTarget.set(p.x + Math.cos(a) * 96, p.y + 42, p.z + Math.sin(a) * 96);
     camera.position.lerp(camTarget, Math.min(1, 2.4 * dt));
     camLook.copy(p);
-  } else if (state.cockpit) {
+    camera.up.copy(UP);
+    camera.lookAt(camLook);
+    applyShake(dt);
+    tweenFov(BASE_FOV, dt);
+    return;
+  }
+
+  if (state.cockpit) {
     camera.position.copy(plane.eye).applyMatrix4(g.matrixWorld);
     camera.quaternion.copy(g.quaternion);
     applyShake(dt);
-    camera.fov = 68 + (state.speed / MAX_SPEED) * 8;
-    camera.updateProjectionMatrix();
+    tweenFov(state.scoped ? SCOPE_FOV : 70, dt);
     return;
-  } else {
-    camTarget.copy(chaseOffset).applyMatrix4(g.matrixWorld);
-    camTarget.y = Math.max(camTarget.y, groundHeightAt(camTarget) + 2.2);
-    camera.position.lerp(camTarget, Math.min(1, 5.5 * dt));
-    camLook.copy(g.position).addScaledVector(fwd, 26).addScaledVector(up, 1.5);
   }
 
-  camera.up.copy(state.cockpit ? UP : up).lerp(UP, state.alive ? 0.35 : 1);
+  chaseOffset.set(0, 5.2, state.scoped ? 12 : 20);
+  camTarget.copy(chaseOffset).applyMatrix4(g.matrixWorld);
+  camTarget.y = Math.max(camTarget.y, world.surfaceAt(camTarget).y + 2.2);
+  camera.position.lerp(camTarget, Math.min(1, 5.5 * dt));
+  camLook.copy(g.position).addScaledVector(fwd, 26).addScaledVector(up, 1.5);
+
+  camera.up.copy(up).lerp(UP, 0.35);
   camera.lookAt(camLook);
   applyShake(dt);
+  tweenFov(state.scoped ? SCOPE_FOV : BASE_FOV + (state.speed / planeSpec.maxSpeed) * 12, dt);
+}
 
-  const targetFov = 62 + (state.speed / MAX_SPEED) * 12;
-  camera.fov += (targetFov - camera.fov) * Math.min(1, 3 * dt);
+function tweenFov(target, dt) {
+  camera.fov += (target - camera.fov) * Math.min(1, 7 * dt);
   camera.updateProjectionMatrix();
 }
 
@@ -821,6 +975,55 @@ function applyShake(dt) {
 }
 
 /* ==========================================================================
+   Session end / menu
+   ========================================================================== */
+
+function endSortie(reason) {
+  if (!session.running) return;
+  session.running = false;
+  running = false;
+  weapons.trigger = false;
+
+  const coins = Math.round(session.score * 0.5);
+  economy.addCoins(coins);
+  economy.record('sorties');
+  economy.record('buildings', session.buildings);
+  economy.record('kills', session.kills);
+  economy.recordBest('bestRun', session.score);
+
+  hud.hide();
+  ui.showResults({
+    title: reason ?? 'Sortie complete',
+    subtitle: `${session.mode.name} · ${session.map?.name ?? 'Free Flight'}`,
+    rows: [
+      ['Score', session.score.toLocaleString('en-GB')],
+      ['Buildings destroyed', String(session.buildings)],
+      ['Casualties', String(session.peds)],
+      ...(session.mode.multiplayer
+        ? [['Kills', String(session.kills)], ['Deaths', String(session.deaths)]]
+        : []),
+      ['Landings', String(session.landings)]
+    ],
+    coins
+  });
+}
+
+function openMenu() {
+  running = false;
+  weapons.trigger = false;
+  hud.hide();
+  ui.show('menu');
+}
+
+function resumeFromMenu() {
+  ui.hide();
+  hud.show();
+  last = performance.now();
+  running = true;
+  audio.resume();
+}
+
+/* ==========================================================================
    Loop
    ========================================================================== */
 
@@ -831,19 +1034,53 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (!running || dt <= 0) return;
+  if (!running || dt <= 0 || !world) return;
 
   if (state.alive) updateFlight(dt);
+  if (!world) return; // a crash during updateFlight can tear the world down
 
+  // engines
   const rpm = state.alive ? 0.18 + state.throttle * 0.82 : 0;
-  plane.propeller.rotation.z += rpm * 62 * dt;
-  plane.propDisc.material.opacity = Math.min(0.3, rpm * 0.34);
+  for (const prop of plane.propellers) prop.rotation.z += rpm * 62 * dt;
+  for (const disc of plane.propDiscs) disc.material.opacity = Math.min(0.3, rpm * 0.34);
 
-  updateBombs(dt);
+  // weapons
+  if (state.alive) {
+    weapons.update(dt, {
+      matrix: plane.group.matrixWorld,
+      muzzles: plane.muzzles,
+      forward: fwd,
+      world,
+      pedestrians,
+      targets: gunTargets(),
+      onHit: (hit) => {
+        if (hit.kind === 'building') demolish(hit.target);
+        else if (hit.kind === 'pedestrian') award('pedestrian');
+        else if (hit.kind === 'plane') net.reportHit(hit.target.id, hit.damage);
+      }
+    });
+  } else {
+    weapons.updateTracers(dt);
+  }
+
+  weapons.updateBombs(dt, { gravity: BOMB_GRAVITY, world, onDetonate: detonate });
+
+  // free flight never runs dry
+  if (!session.mode.finiteAmmo) {
+    weapons.ammo = weapons.maxAmmo;
+    weapons.bombs = weapons.maxBombs;
+  }
+
+  updateFires(dt);
   updateCollapses(dt);
+  pedestrians?.update(dt, plane.group.position);
   effects.update(dt);
   updateSight();
+  syncRemotes(dt);
   updateCamera(dt);
+
+  // stream the endless world in around the aircraft
+  if (session.mode.infinite) world.update(plane.group.position);
 
   const info = approachInfo();
   updatePAPI(info);
@@ -854,32 +1091,61 @@ function frame(now) {
   sun.target.position.copy(focus);
   sun.target.updateMatrixWorld();
 
-  audio.update(rpm, state.speed / MAX_SPEED, state.alive);
+  audio.update(rpm, state.speed / planeSpec.maxSpeed, state.alive);
 
-  // Only a real final approach: short of the aim point, inbound, and at an
-  // angle that means anything. Overflying the field at altitude is not one.
+  cockpit.update(dt, {
+    speed: state.speed,
+    maxSpeed: planeSpec.maxSpeed,
+    altitude: Math.max(0, plane.group.position.y),
+    throttle: state.throttle,
+    rpm,
+    hp: state.hp,
+    maxHp: state.maxHp,
+    pitchIn: state.pitchIn,
+    rollIn: state.rollIn
+  });
+
+  if (session.room) {
+    net.pushState(dt, {
+      position: plane.group.position,
+      quaternion: plane.group.quaternion,
+      speed: state.speed,
+      hp: state.hp,
+      alive: state.alive,
+      plane: planeSpec.id
+    });
+  }
+
+  // sortie clock
+  if (session.mode.timed && session.running) {
+    session.timeLeft -= dt;
+    if (session.timeLeft <= 0) {
+      endSortie('Time up');
+      return;
+    }
+  }
+
   const onFinal =
-    state.alive &&
-    !state.grounded &&
-    info.along < -90 &&
-    info.distance < 1700 &&
-    info.height > 2 &&
-    info.angle < 16;
+    state.alive && !state.grounded &&
+    info.along < -90 && info.distance < 1700 && info.height > 2 && info.angle < 16;
 
   hud.tick(dt);
   hud.update({
     speed: state.speed,
-    altitude: Math.max(0, plane.group.position.y - GEAR_HEIGHT),
+    altitude: Math.max(0, plane.group.position.y - plane.gearHeight),
     verticalSpeed: state.grounded ? 0 : state.velocity.y,
     heading: (Math.atan2(fwd.x, -fwd.z) * DEG + 360) % 360,
     throttle: state.throttle,
-    bombs: state.bombs,
-    score: state.score,
+    ammo: weapons.ammo,
+    bombs: weapons.bombs,
+    score: session.score,
+    hp: state.hp / state.maxHp,
     fieldDistance: info.distance,
-    mapName: world.map.name,
-    stalling: state.alive && !state.grounded && state.speed < STALL_SPEED,
+    mapName: session.map?.name ?? 'Free Flight',
+    stalling: state.alive && !state.grounded && state.speed < planeSpec.stall,
     braking: state.braking,
-    approach: onFinal ? info : null
+    approach: onFinal ? info : null,
+    modeValue: session.mode.timed ? formatClock(session.timeLeft) : '∞'
   });
 
   renderer.render(scene, camera);
@@ -897,44 +1163,44 @@ addEventListener('resize', () => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    running = false;
-  } else if (!menu.open) {
+  if (document.hidden) running = false;
+  else if (!ui.visible && world) {
     last = performance.now();
     running = true;
     audio.resume();
   }
 });
 
-const menu = new MapMenu((map) => {
-  audio.start();
-  audio.resume();
-  loadMap(map);
-  hud.show();
-  last = performance.now();
-  running = true;
+const ui = new UI({ economy, net, onLaunch: launch });
+
+/* ---------- multiplayer events that reach into the flight ---------- */
+
+net.on('killed', (msg) => {
+  hud.killFeed(msg.killerName ?? 'Someone', msg.victimName ?? 'someone');
+  if (msg.killer === net.id && msg.victim !== net.id) award('kill');
 });
 
-function openMenu() {
-  running = false;
-  hud.hide();
-  menu.show(`Currently over ${world.map.name} — M or Esc to resume`);
-}
+// The server delivers damage straight to the victim; splice that into the
+// client's message handling without the net layer needing to know about flight.
+net.handle = ((original) => function patched(msg) {
+  if (msg.t === 'damaged') {
+    damage(msg.damage, msg.by, 'SHOT DOWN');
+    return;
+  }
+  original.call(net, msg);
+  if (msg.t === 'over') endSortie('Match over');
+})(net.handle);
 
-function resumeFromMenu() {
-  menu.hide();
-  hud.show();
-  last = performance.now();
-  running = true;
-  audio.resume();
-}
+/* ---------- debug handle ---------- */
 
-// Debug handle — handy from the console for tuning, and for automated checks.
 window.sim = {
-  state, plane, camera, scene, effects, bombs,
-  crash, respawn, detonate, loadMap, approachInfo,
+  state, session, economy, net, weapons, effects, camera, scene, hud,
+  get plane() { return plane; },
   get world() { return world; },
   get runway() { return runway; },
+  get pedestrians() { return pedestrians; },
+  get remotes() { return remotes; },
+  crash, respawn, detonate, approachInfo, launch, endSortie, buildAircraft,
   setRunning(v) {
     running = v;
     last = performance.now();
