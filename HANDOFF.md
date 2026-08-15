@@ -205,22 +205,33 @@ window.sim.setRunning(false);   // freeze so the last frame stays on screen
 WebGL canvases screenshot correctly through the compositor even though
 `preserveDrawingBuffer` is off — **provided the loop is frozen**.
 
-This caught several real bugs that reading the code did not: an aliased shared
-temporary vector in the particle system, a butte generated on the approach
-centreline, landings that graded far too leniently against the fpm shown on the
-HUD, and both cockpit faults above.
+This caught every real bug found in this project, none of which reading the code
+would have surfaced: an aliased shared temporary vector in the particle system; a
+butte generated on the approach centreline; landings graded far too leniently
+against the fpm shown on the HUD; rolling off the Bayside causeway treated as a
+gentle landing on the sea; both cockpit faults above; and a CSS rule
+(`.screen { display: grid }`) that overrode the `hidden` attribute so every menu
+screen rendered stacked on top of the others at once.
 
 ### Things verified working
 
-Takeoff and climb; bombing and building destruction; gun damage (600 hp tower →
-132 hp under 1.5s of 30mm); pedestrian ray hits and blast kills; landing grading
-across the whole band from greaser to crash; hazard collisions; map switching
-without leaking objects; Free Flight chunk streaming (49 chunks held constant,
-buildings varying 299–731 with terrain) and unlimited ammo; the cockpit panel.
+- Takeoff and climb for **all six aircraft** — each unsticks in 17–25 m and
+  climbs to 200 m without crashing, so the fast types are not runway-limited
+- Bombing and building destruction
+- Gun damage: a 600 hp tower taken to 132 hp under 1.5 s of 30mm
+- Pedestrian ray hits (straight down and at a shallow angle) and blast kills
+- Landing grading across the whole band, greaser through to crash
+- Terrain hazard collisions, with the right message per map
+- Map switching without leaking objects (object counts return to baseline over
+  eight consecutive swaps)
+- Free Flight chunk streaming: 49 chunks held constant while buildings vary
+  299–731 with terrain; unlimited ammo confirmed
+- Cockpit instrument panel drawing live values
+- All three shop tabs, and the buy → equip flow
+- The live GitHub Pages build, not just localhost
 
 ### Never tested
 
-Two-client multiplayer. Any of the six aircraft other than the starter Sparrow in
-actual flight — the physics is shared and parameterised, so they should be fine,
-but the fast ones (Comet, Vector) have high stall speeds and may make the shorter
-runways unusable. Worth a pass.
+**Two-client multiplayer.** Every single-client path is exercised (connect, lobby
+list, create, join, password rejection) but a real two-player match has never
+run. This is the first thing to verify, and the most likely place for bugs.
