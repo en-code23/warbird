@@ -441,7 +441,9 @@ kbd {
 }
 .wallet .coin { font-size: 11px; }
 
+/* `hidden` must win over this display rule, or every screen stacks up at once */
 .screen { width: 100%; display: grid; place-items: center; }
+.screen[hidden] { display: none; }
 .panel.wide { width: min(1080px, 96vw); }
 
 .btn {
@@ -539,7 +541,8 @@ kbd {
 .shop-blurb { margin: 10px 0 14px; font-size: 11.5px; line-height: 1.7; color: var(--hud-dim); }
 
 .shop-stats { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
-.stat { display: grid; grid-template-columns: 8.4em 1fr 5.4em; align-items: center; gap: 8px; font-size: 10.5px; }
+.stat { display: grid; grid-template-columns: 9.2em 1fr 5.4em; align-items: center; gap: 8px; font-size: 10.5px; }
+.stat-label { white-space: nowrap; }
 .stat-label { color: var(--hud-dim); letter-spacing: 0.06em; }
 .stat-track { height: 5px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(142, 242, 196, 0.18); }
 .stat-fill { display: block; height: 100%; background: var(--hud); opacity: 0.75; }

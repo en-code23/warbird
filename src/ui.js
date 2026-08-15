@@ -309,7 +309,7 @@ export class UI {
       return [
         statBar('Top speed', displaySpeed(item.maxSpeed), 320, ' kt'),
         statBar('Stall', displaySpeed(item.stall), 320, ' kt'),
-        statBar('Climb / thrust', item.thrust, 260),
+        statBar('Climb rate', item.thrust, 260),
         statBar('Roll rate', item.roll * 100, 320, '°/s'),
         statBar('Armour', item.armour, 340, ' hp'),
         statBar('Bomb load', item.bombLoad, 90),
@@ -327,7 +327,7 @@ export class UI {
         statBar('Rate of fire', item.rpm, 3600, ' rpm'),
         statBar('Muzzle velocity', item.velocity, 950, ' m/s'),
         statBar('Accuracy', (0.022 - item.spread) * 4500, 100, '%'),
-        statBar('Ammo per mount', item.ammo, 1800),
+        statBar('Ammo / mount', item.ammo, 1800),
         statBar(`Burst DPS (×${mounts})`, (item.damage * item.rpm * mounts) / 60, 6000)
       ];
     }
