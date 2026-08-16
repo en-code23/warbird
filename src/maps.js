@@ -12,6 +12,7 @@ export const MAPS = [
     name: 'Midtown',
     blurb: 'A dense grid on open farmland. Long runway, clear approach, nothing in the way.',
     difficulty: 'Easy',
+    defences: { count: 4, range: 1000, minHeight: 45, accuracy: 0.30, damage: 9 },
     env: {
       skyTop: 0x2f6fb0,
       skyHorizon: 0xbcd4e2,
@@ -47,6 +48,7 @@ export const MAPS = [
     name: 'Bayside',
     blurb: 'A harbour city on the water. The field is a causeway across the bay, and it runs crosswise.',
     difficulty: 'Moderate',
+    defences: { count: 7, range: 1200, minHeight: 50, accuracy: 0.44, damage: 13 },
     env: {
       skyTop: 0x2a6ea8,
       skyHorizon: 0xcfe0e6,
@@ -84,6 +86,7 @@ export const MAPS = [
     name: 'Dust Basin',
     blurb: 'A low adobe town on a desert floor, hemmed in by buttes. Rock does not fall down when you bomb it.',
     difficulty: 'Hard',
+    defences: { count: 11, range: 1400, minHeight: 60, accuracy: 0.62, damage: 18 },
     env: {
       skyTop: 0x4b86b4,
       skyHorizon: 0xe6d2ae,
@@ -120,6 +123,7 @@ export const MAPS = [
     name: 'Kranzberg',
     blurb: 'A valley town at dusk, ringed by peaks. Short strip, high ground on both sides of the approach.',
     difficulty: 'Hard',
+    defences: { count: 11, range: 1350, minHeight: 55, accuracy: 0.60, damage: 18 },
     env: {
       skyTop: 0x27406e,
       skyHorizon: 0xe8a06a,
@@ -158,6 +162,7 @@ export const MAPS = [
       'A sprawling industrial city under permanent overcast. Big flat sheds and ' +
       'almost no landmarks — easy to get lost over, and very easy to hit.',
     difficulty: 'Moderate',
+    defences: { count: 8, range: 1280, minHeight: 50, accuracy: 0.48, damage: 14 },
     env: {
       skyTop: 0x5a6470,
       skyHorizon: 0x9aa2a8,
@@ -195,6 +200,7 @@ export const MAPS = [
       'The same kind of city at two in the morning. Every window is lit and nothing ' +
       'else is — you fly the approach on the PAPI and the instruments alone.',
     difficulty: 'Hard',
+    defences: { count: 12, range: 1500, minHeight: 65, accuracy: 0.58, damage: 19 },
     night: true,
     env: {
       skyTop: 0x05070f,

@@ -11,15 +11,17 @@ export const MODES = [
     name: 'Strike',
     tag: 'Singleplayer',
     blurb:
-      'A timed sortie against one city. Destroy as much as you can before the ' +
-      'clock runs out — buildings are worth the most, people and vehicles less. ' +
-      'Everything you score converts to coins for the shop.',
+      'A timed sortie against a defended city. Destroy as much as you can before ' +
+      'the clock runs out — but the flak batteries are shooting back, and silencing ' +
+      'them first pays better than flying through them.',
     timed: true,
     durations: [120, 300, 600],
     defaultDuration: 300,
     finiteAmmo: true,
     bounded: true,
-    scoring: { building: 10, pedestrian: 2, kill: 0, landing: 25 }
+    // Flak is the premium target: it is the only thing that can kill you here,
+    // and suppressing it is a real decision rather than free points.
+    scoring: { building: 10, pedestrian: 2, vehicle: 6, flak: 60, kill: 0, landing: 25 }
   },
   {
     id: 'freeflight',
@@ -33,7 +35,7 @@ export const MODES = [
     infinite: true,
     finiteAmmo: false,
     bounded: false,
-    scoring: { building: 0, pedestrian: 0, kill: 0, landing: 0 }
+    scoring: { building: 0, pedestrian: 0, vehicle: 0, flak: 0, kill: 0, landing: 0 }
   },
   {
     id: 'multiplayer',
@@ -49,7 +51,7 @@ export const MODES = [
     finiteAmmo: true,
     bounded: true,
     multiplayer: true,
-    scoring: { building: 4, pedestrian: 1, kill: 100, landing: 10 }
+    scoring: { building: 4, pedestrian: 1, vehicle: 3, flak: 25, kill: 100, landing: 10 }
   }
 ];
 

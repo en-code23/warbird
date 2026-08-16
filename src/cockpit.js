@@ -240,7 +240,7 @@ export class Cockpit {
     // throttle quadrant
     g.fillStyle = '#20262a';
     g.fillRect(404, 186, 96, 12);
-    g.fillStyle = '#8ef2c4';
+    g.fillStyle = '#cde06a';
     g.fillRect(404, 186, 96 * s.throttle, 12);
     g.fillStyle = '#7d868c';
     g.fillText('THROTTLE', 404, 180);

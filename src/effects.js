@@ -45,6 +45,37 @@ export class Effects {
   constructor(scene) {
     this.scene = scene;
 
+    /**
+     * Particle budget, 0..1. Low tiers spawn proportionally fewer of
+     * everything: the pools stay the same size, so nothing reallocates, but a
+     * heavy bombing run does not try to draw four hundred sprites on a phone.
+     */
+    this.budget = 1;
+
+    /**
+     * Persistent rubble.
+     *
+     * Collapsed buildings used to just scale down and darken, so a flattened
+     * block left nothing behind but a stain. These are static instanced boxes
+     * dropped around the base when a collapse finishes and never removed — one
+     * draw call for the whole city's ruins.
+     */
+    this.rubbleMax = 420;
+    this.rubbleUsed = 0;
+    this.rubble = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0x5d5750, roughness: 1, flatShading: true }),
+      this.rubbleMax
+    );
+    this.rubble.frustumCulled = false;
+    this.rubble.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    {
+      // park every slot until it is claimed
+      const m = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < this.rubbleMax; i++) this.rubble.setMatrixAt(i, m);
+    }
+    scene.add(this.rubble);
+
     const ballGeo = new THREE.IcosahedronGeometry(1, 2);
     const ringGeo = new THREE.RingGeometry(0.55, 1, 36);
     ringGeo.rotateX(-Math.PI / 2);
@@ -119,7 +150,48 @@ export class Effects {
     });
   }
 
+  /** Tier hook: scales how many particles each spawner actually emits. */
+  setBudget(scale) {
+    this.budget = Math.max(0.15, Math.min(1, scale));
+  }
+
   /* ---------- spawners ---------- */
+
+  /**
+   * Drops a heap of debris blocks where a building came down. Static — this is
+   * scenery from now on, not a particle.
+   *
+   * @param {THREE.Vector3} center
+   * @param {THREE.Vector3} size  the building's footprint and height
+   */
+  dropRubble(center, size) {
+    const want = Math.round(
+      Math.min(9, 3 + Math.sqrt(size.x * size.z) * 0.12) * this.budget
+    );
+    const n = Math.min(want, this.rubbleMax - this.rubbleUsed);
+    if (n <= 0) return;
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const p = new THREE.Vector3();
+    const s = new THREE.Vector3();
+    const axis = new THREE.Vector3();
+
+    for (let i = 0; i < n; i++) {
+      const k = 0.16 + Math.random() * 0.3;
+      s.set(size.x * k, size.y * 0.035 + Math.random() * 2.2, size.z * k);
+      p.set(
+        center.x + (Math.random() - 0.5) * size.x * 1.15,
+        s.y * 0.4,
+        center.z + (Math.random() - 0.5) * size.z * 1.15
+      );
+      axis.set(Math.random() - 0.5, 1, Math.random() - 0.5).normalize();
+      q.setFromAxisAngle(axis, Math.random() * 0.5);
+      m.compose(p, q, s);
+      this.rubble.setMatrixAt(this.rubbleUsed++, m);
+    }
+    this.rubble.instanceMatrix.needsUpdate = true;
+  }
 
   puff(pos, opts = {}) {
     const p = pick(this.puffs);
@@ -163,8 +235,10 @@ export class Effects {
    */
   explode(pos, opts = {}) {
     const R = opts.radius ?? 16;
-    const nDebris = opts.debris ?? 26;
-    const nSmoke = opts.smoke ?? 14;
+    // The fireball layers, ring and flash are fixed cost; only the particle
+    // counts scale with the tier, so a low-end explosion still reads the same.
+    const nDebris = Math.round((opts.debris ?? 26) * this.budget);
+    const nSmoke = Math.round((opts.smoke ?? 14) * this.budget);
 
     // layered fireballs of slightly different size and timing
     for (let i = 0; i < 3; i++) {
@@ -248,6 +322,12 @@ export class Effects {
     for (const d of this.debris) { d.life = 0; d.m.visible = false; }
     for (const p of this.puffs) { p.life = 0; p.s.visible = false; }
     for (const lg of this.lights) { lg.life = 0; lg.l.intensity = 0; }
+
+    // ruins belong to the world that made them
+    const m = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < this.rubbleUsed; i++) this.rubble.setMatrixAt(i, m);
+    if (this.rubbleUsed) this.rubble.instanceMatrix.needsUpdate = true;
+    this.rubbleUsed = 0;
   }
 
   /* ---------- update ---------- */

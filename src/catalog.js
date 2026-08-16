@@ -62,7 +62,7 @@ export const PLANES = [
     id: 'falcon',
     name: 'Falcon Mk.V',
     role: 'Fighter',
-    price: 1200,
+    price: 900,
     blurb:
       'The workhorse single-seat fighter. Balanced across the board: quick enough ' +
       'to catch anything it needs to, agile enough to turn with most of it, and ' +
@@ -88,7 +88,7 @@ export const PLANES = [
     id: 'comet',
     name: 'Comet R.2',
     role: 'Interceptor',
-    price: 2600,
+    price: 2100,
     blurb:
       'Built around one very large engine and not much else. Blistering in a ' +
       'straight line and vicious in the vertical, but it rolls into a turn faster ' +
@@ -114,7 +114,7 @@ export const PLANES = [
     id: 'hammer',
     name: 'Hammer A.3',
     role: 'Ground attack',
-    price: 3400,
+    price: 3200,
     blurb:
       'An armoured gun platform for working low over a target. It will not win a ' +
       'turning fight, but it absorbs punishment that would fold a fighter, carries ' +
@@ -140,7 +140,7 @@ export const PLANES = [
     id: 'fortress',
     name: 'Fortress B.9',
     role: 'Heavy bomber',
-    price: 6000,
+    price: 5400,
     blurb:
       'Four engines, an enormous bay, and the turning circle of a container ship. ' +
       'Flown properly it flattens a district in one pass. Flown badly it is the ' +
@@ -166,7 +166,7 @@ export const PLANES = [
     id: 'vector',
     name: 'Vector J.1',
     role: 'Jet',
-    price: 12000,
+    price: 9800,
     blurb:
       'The first of the turbojets. No propeller, no torque, and acceleration that ' +
       'makes everything else feel moored. The catch is inertia: it does not slow ' +
@@ -222,7 +222,7 @@ export const GUNS = [
   {
     id: 'fifty',
     name: '12.7mm HMG',
-    price: 700,
+    price: 600,
     blurb:
       'The standard heavy machine gun. Enough punch to matter against aircraft, ' +
       'flat trajectory, and still plenty of rounds. The safe default.',
@@ -237,7 +237,7 @@ export const GUNS = [
   {
     id: 'cannon20',
     name: '20mm Cannon',
-    price: 1800,
+    price: 1500,
     blurb:
       'Explosive shells. A short burst downs a fighter and a sustained one opens ' +
       'up a building. Slower firing and much less ammunition, so it rewards ' +
@@ -253,7 +253,7 @@ export const GUNS = [
   {
     id: 'cannon30',
     name: '30mm Cannon',
-    price: 3800,
+    price: 3200,
     blurb:
       'Anti-armour autocannon. Two or three hits will end almost anything flying. ' +
       'It fires slowly, the shells drop noticeably at range, and you get very few ' +
@@ -269,7 +269,7 @@ export const GUNS = [
   {
     id: 'gatling',
     name: 'Rotary Gatling',
-    price: 6500,
+    price: 5600,
     blurb:
       'Six barrels spun by an electric motor. A wall of fire that saws through ' +
       'structures and aircraft alike, with a short spin-up before the first round ' +
@@ -313,7 +313,7 @@ export const BOMBS = [
   {
     id: 'gp250',
     name: '250kg GP',
-    price: 500,
+    price: 400,
     blurb:
       'The standard general-purpose bomb, and the one the bomb sight is calibrated ' +
       'around. Reliable blast radius, predictable fall, no surprises.',
@@ -327,7 +327,7 @@ export const BOMBS = [
   {
     id: 'heavy500',
     name: '500kg Heavy',
-    price: 1600,
+    price: 1300,
     blurb:
       'Takes out a whole block corner in one. Falls fast and true, but you carry ' +
       'barely half as many, and dropping one below about 60 m puts you inside your ' +
@@ -342,7 +342,7 @@ export const BOMBS = [
   {
     id: 'cluster',
     name: 'Cluster Munition',
-    price: 2900,
+    price: 2400,
     blurb:
       'Opens at altitude and scatters twelve bomblets across a wide footprint. ' +
       'Poor against a single hard target, devastating against a densely built ' +
@@ -359,7 +359,7 @@ export const BOMBS = [
   {
     id: 'incendiary',
     name: 'Incendiary',
-    price: 4200,
+    price: 3600,
     blurb:
       'Sets everything inside the blast alight. The initial radius is modest, but ' +
       'the fire keeps spreading to neighbouring buildings for a while after the ' +

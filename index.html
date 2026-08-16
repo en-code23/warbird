@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover so the layout can reach under a notch, then pad back
+       out with env(safe-area-inset-*); no user scaling, because a pinch in the
+       middle of a landing is not a feature -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+  <meta name="theme-color" content="#0a0f14">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Warbird — browser flight sim</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./src/style.css">
@@ -105,6 +111,80 @@
     <div class="killfeed" id="v-killfeed"></div>
     <div class="banner" id="v-banner"></div>
     <div class="coinpop" id="v-coinpop"></div>
+  </div>
+
+  <!-- ======================= TOUCH CONTROLS ======================= -->
+  <!--
+    Cockpit furniture, not a game overlay. The throttle is a slide lever in a
+    slotted gate; the stick has no fixed base — you touch the right side of the
+    screen and that point becomes centre. See src/touch.js for why.
+  -->
+  <div id="touch" hidden>
+    <!-- the stick lives under everything else so buttons can sit on top -->
+    <div id="t-stick">
+      <div id="t-stick-ring">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="46" />
+          <line x1="50" y1="8" x2="50" y2="20" />
+          <line x1="50" y1="80" x2="50" y2="92" />
+          <line x1="8" y1="50" x2="20" y2="50" />
+          <line x1="80" y1="50" x2="92" y2="50" />
+        </svg>
+        <div id="t-stick-dot"></div>
+      </div>
+    </div>
+
+    <!-- throttle quadrant -->
+    <div class="t-quad-wrap">
+      <div id="t-quadrant">
+        <div class="t-gate"></div>
+        <div class="t-detents">
+          <i style="bottom:100%"></i><i style="bottom:75%"></i>
+          <i style="bottom:50%"></i><i style="bottom:25%"></i><i style="bottom:0%"></i>
+        </div>
+        <div id="t-lever"><span class="t-knob"></span></div>
+      </div>
+      <div class="t-quad-label">THR <b id="t-thr-value">70</b></div>
+    </div>
+
+    <!-- rudder rocker -->
+    <!-- both pedals first, then the caption: a grid item that spans every
+         column has to come after the row it captions, or it splits the row -->
+    <div class="t-rudder">
+      <button class="t-btn t-rud" id="t-rud-l" aria-label="Left rudder">&#9664;</button>
+      <button class="t-btn t-rud" id="t-rud-r" aria-label="Right rudder">&#9654;</button>
+      <span class="t-rud-label">RUDDER</span>
+    </div>
+
+    <!-- primary controls -->
+    <div class="t-fire">
+      <button class="t-btn t-bomb" id="t-bomb" aria-label="Release bomb">
+        <span class="t-glyph">&#9679;</span><span class="t-cap">BOMB</span>
+      </button>
+      <button class="t-btn t-guns" id="t-guns" aria-label="Fire guns">
+        <span class="t-glyph">&#10043;</span><span class="t-cap">GUNS</span>
+      </button>
+    </div>
+
+    <!-- panel switches -->
+    <div class="t-switches">
+      <button class="t-btn t-sw" id="t-scope" aria-label="Toggle scope">SCOPE</button>
+      <button class="t-btn t-sw" id="t-view" aria-label="Change view">VIEW</button>
+      <button class="t-btn t-sw" id="t-brake" aria-label="Wheel brakes">BRAKE</button>
+      <button class="t-btn t-sw" id="t-menu" aria-label="Menu">MENU</button>
+    </div>
+  </div>
+
+  <!-- landscape nag -->
+  <div id="rotate" hidden>
+    <div class="rotate-inner">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="14" y="6" width="36" height="52" rx="4" />
+        <path d="M8 44a26 26 0 0 0 20 14" />
+      </svg>
+      <h2>Turn your phone</h2>
+      <p>Warbird flies in landscape. There is nowhere to put the stick that isn't also where the horizon needs to be.</p>
+    </div>
   </div>
 
   <!-- ========================== OVERLAY ========================== -->
@@ -248,6 +328,23 @@
     <section class="screen" data-screen="help" hidden>
       <div class="panel">
         <h1>Controls</h1>
+
+        <div class="duration">
+          <span class="dur-label">GRAPHICS</span>
+          <div class="dur-opts" id="quality-opts"></div>
+        </div>
+        <p class="quality-note" id="quality-note"></p>
+
+        <h2 class="section-head">Touch</h2>
+        <table class="controls">
+          <tr><td>Right side</td><td>Stick — touch anywhere and drag; that point becomes centre</td></tr>
+          <tr><td>Left lever</td><td>Throttle. Slide it up for power; it stays where you leave it</td></tr>
+          <tr><td>GUNS</td><td>Hold to fire</td></tr>
+          <tr><td>BOMB</td><td>Release one bomb</td></tr>
+          <tr><td>&#9664; &#9654;</td><td>Rudder — steering on the ground, trim in the air</td></tr>
+        </table>
+
+        <h2 class="section-head">Keyboard</h2>
         <table class="controls">
           <tr><td><kbd>W</kbd><kbd>S</kbd></td><td>Pitch down / up</td></tr>
           <tr><td><kbd>Q</kbd><kbd>E</kbd></td><td>Roll left / right</td></tr>

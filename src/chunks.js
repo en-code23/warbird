@@ -1,11 +1,12 @@
 import * as THREE from 'three';
+import { BuildingBatch } from './buildings.js';
 
 /**
  * Endless procedural world for Free Flight.
  *
- * Space is divided into square chunks. Chunks within `RADIUS` of the aircraft
- * are built; ones that fall outside are torn down and their geometry returned
- * to the pool. Every chunk's contents come from a hash of its coordinates, so
+ * Space is divided into square chunks. Chunks within the quality tier's chunk
+ * radius are built; ones that fall outside are torn down and their slots
+ * returned to the pool. Every chunk's contents come from a hash of its coordinates, so
  * the same patch of world is identical every time you fly back over it —
  * nothing is stored, and the world is effectively infinite.
  *
@@ -15,8 +16,8 @@ import * as THREE from 'three';
  */
 
 const CHUNK = 420;
-const RADIUS = 3; // chunks loaded in each direction -> (2R+1)^2 live chunks
 const LOT = 60;
+const GLIDESLOPE = 4.0; // must match the value the flight code grades against
 
 /** Deterministic PRNG so a chunk always regenerates identically. */
 function mulberry32(seed) {
@@ -92,8 +93,10 @@ export const FREEFLIGHT_ENV = {
 };
 
 export class ChunkWorld {
-  constructor(scene) {
+  constructor(scene, quality) {
     this.scene = scene;
+    this.quality = quality;
+    this.radius = quality.chunkRadius;
     this.group = new THREE.Group();
     this.group.name = 'world:freeflight';
     scene.add(this.group);
@@ -111,8 +114,25 @@ export class ChunkWorld {
 
     /* shared assets — created once, reused by every chunk */
     this.facade = facadeTexture();
-    this.roofMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4c, roughness: 0.95 });
+    this.facade.anisotropy = quality.anisotropy;
     this.roadMat = new THREE.MeshStandardMaterial({ color: 0x2f3235, roughness: 0.95 });
+
+    // One batch for the whole streamed world.
+    //
+    // A chunk lays out at most 7x7 lots and skips ~18% of them, so ~40 is the
+    // realistic per-chunk worst case; flying a long way through dense country
+    // was measured peaking at 769 buildings across 25 chunks. 46 per chunk
+    // leaves real headroom above that. If it ever does fill, create() returns
+    // null and the chunk simply builds sparser rather than failing.
+    const live = (this.radius * 2 + 1) ** 2;
+    this.batch = new BuildingBatch(this.group, {
+      capacity: live * 46,
+      map: this.facade,
+      tile: 16,
+      roofColor: 0x4a4a4c,
+      night: false,
+      shadows: quality.shadows
+    });
     this.trunkGeo = new THREE.CylinderGeometry(0.4, 0.55, 4, 5);
     this.trunkGeo.translate(0, 2, 0);
     this.leafGeo = new THREE.IcosahedronGeometry(2.6, 0);
@@ -127,11 +147,11 @@ export class ChunkWorld {
 
     /* ground follows the aircraft rather than tiling per chunk */
     this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(CHUNK * (RADIUS * 2 + 3), CHUNK * (RADIUS * 2 + 3)),
+      new THREE.PlaneGeometry(CHUNK * (this.radius * 2 + 3), CHUNK * (this.radius * 2 + 3)),
       new THREE.MeshStandardMaterial({ color: 0x5f7a45, roughness: 1 })
     );
     this.ground.rotation.x = -Math.PI / 2;
-    this.ground.receiveShadow = true;
+    this.ground.receiveShadow = quality.shadows;
     this.group.add(this.ground);
 
     /* a home strip at the origin so Free Flight still has somewhere to land */
@@ -165,12 +185,33 @@ export class ChunkWorld {
     const forward = new THREE.Vector3(0, 0, -1);
     const side = new THREE.Vector3(1, 0, 0);
     const centre = new THREE.Vector3(0, 0, 0);
+    const touchdown = new THREE.Vector3(0, 0, length / 2 - 60);
+
+    // Free Flight used to have a bare strip and an empty `papi` array, so it
+    // was the one mode where a landing could not be flown properly. Same four
+    // lights on the same 4° slope as every other field.
     const papi = [];
+    const papiGeo = new THREE.SphereGeometry(0.9, 8, 6);
+    for (let i = 0; i < 4; i++) {
+      const mesh = new THREE.Mesh(papiGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      mesh.position.set(-(width / 2 + 10 + i * 5), 1.6, touchdown.z);
+      this.group.add(mesh);
+      // each light flips white->red at a slightly different angle, so the pair
+      // pattern reads as high / on slope / low
+      mesh.angle = GLIDESLOPE + (i - 1.5) * 0.34;
+      papi.push(mesh);
+
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.16, 1.6, 5),
+        new THREE.MeshStandardMaterial({ color: 0x3a3f42 })
+      );
+      post.position.set(mesh.position.x, 0.8, mesh.position.z);
+      this.group.add(post);
+    }
 
     return {
       x: 0, z: 0, length, width, axis: 'z', dir: -1, deck: 0,
-      forward, side, centre, papi,
-      touchdown: new THREE.Vector3(0, 0, length / 2 - 60),
+      forward, side, centre, papi, touchdown,
       start: new THREE.Vector3(0, 0, length / 2 - 30),
       contains(p) {
         return Math.abs(p.x) < width / 2 + 5 && Math.abs(p.z) < length / 2;
@@ -188,8 +229,9 @@ export class ChunkWorld {
     this.ground.position.set(cx * CHUNK, 0, cz * CHUNK);
 
     // build anything newly in range
-    for (let dx = -RADIUS; dx <= RADIUS; dx++) {
-      for (let dz = -RADIUS; dz <= RADIUS; dz++) {
+    const R = this.radius;
+    for (let dx = -R; dx <= R; dx++) {
+      for (let dz = -R; dz <= R; dz++) {
         const key = `${cx + dx},${cz + dz}`;
         if (!this.chunks.has(key)) this.buildChunk(cx + dx, cz + dz, key);
       }
@@ -198,7 +240,7 @@ export class ChunkWorld {
     // drop anything that has fallen out of range
     for (const [key, chunk] of this.chunks) {
       const [kx, kz] = key.split(',').map(Number);
-      if (Math.abs(kx - cx) > RADIUS || Math.abs(kz - cz) > RADIUS) {
+      if (Math.abs(kx - cx) > R || Math.abs(kz - cz) > R) {
         this.dropChunk(key, chunk);
       }
     }
@@ -236,7 +278,8 @@ export class ChunkWorld {
           const centreBias = 1 - Math.hypot(i - cols / 2, j - cols / 2) / cols;
           const h = (8 + rand() * 20) * (1 + downtown * centreBias * 4);
 
-          buildings.push(this.makeBuilding(group, bx, bz, w, d, h, rand));
+          const bld = this.makeBuilding(group, bx, bz, w, d, h, rand);
+          if (bld) buildings.push(bld);
         }
       }
 
@@ -271,10 +314,13 @@ export class ChunkWorld {
     }
 
     /* ---- trees everywhere else ---- */
-    const treeCount = isHome ? 20 : Math.floor(24 + rand() * 46);
+    const treeCount = Math.max(
+      4,
+      Math.round((isHome ? 20 : 24 + rand() * 46) * this.quality.vegetationScale)
+    );
     const trunks = new THREE.InstancedMesh(this.trunkGeo, this.trunkMat, treeCount);
     const leaves = new THREE.InstancedMesh(this.leafGeo, this.leafMat, treeCount);
-    trunks.castShadow = leaves.castShadow = true;
+    trunks.castShadow = leaves.castShadow = this.quality.shadows;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
@@ -302,66 +348,37 @@ export class ChunkWorld {
   }
 
   makeBuilding(group, x, z, w, d, h, rand) {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    // repeat the facade at a constant world size instead of stretching it
-    const uv = geo.attributes.uv;
-    const spans = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
-    for (let f = 0; f < 6; f++) {
-      const su = Math.max(1, Math.round(spans[f][0] / 16));
-      const sv = Math.max(1, Math.round(spans[f][1] / 16));
-      for (let i = 0; i < 4; i++) {
-        const k = f * 4 + i;
-        uv.setXY(k, uv.getX(k) * su, uv.getY(k) * sv);
-      }
-    }
-    geo.translate(0, h / 2, 0);
-
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({
-        map: this.facade,
-        color: FACADES[Math.floor(rand() * FACADES.length)],
-        roughness: 0.85
-      })
-    );
-    mesh.position.set(x, 0, z);
-    mesh.castShadow = mesh.receiveShadow = true;
-    group.add(mesh);
-
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 1.04, 0.8, d * 1.04), this.roofMat);
-    roof.position.set(x, h, z);
-    group.add(roof);
-
-    const maxHp = Math.round(40 + w * d * 0.35 + h * 5);
-    return {
-      mesh, roof, height: h,
-      size: new THREE.Vector3(w, h, d),
-      min: new THREE.Vector3(x - w / 2, 0, z - d / 2),
-      max: new THREE.Vector3(x + w / 2, h, z + d / 2),
-      center: new THREE.Vector3(x, h / 2, z),
-      alive: true, collapse: 0,
-      hp: maxHp, maxHp,
-      baseColor: mesh.material.color.clone(),
-      burning: false,
-      chunkKey: null
-    };
+    // Every chunk's buildings share one batch (see buildings.js): the whole
+    // streamed world is 2 draw calls, and building a chunk no longer allocates
+    // geometry or a material per structure.
+    return this.batch.create(x, z, w, d, h, {
+      color: FACADES[Math.floor(rand() * FACADES.length)]
+    });
   }
 
   dropChunk(key, chunk) {
+    // This used to indexOf + splice each building out of the master list, which
+    // is O(n²) over a chunk and produced a visible hitch every time one was
+    // dropped. Mark them and sweep the list once instead.
     for (const b of chunk.buildings) {
-      const i = this.buildings.indexOf(b);
-      if (i >= 0) this.buildings.splice(i, 1);
-      b.mesh.geometry.dispose();
-      b.mesh.material.dispose();
-      b.roof.geometry.dispose();
+      b.dropped = true;
+      b.release();
+    }
+    if (chunk.buildings.length) {
+      this.buildings = this.buildings.filter((b) => !b.dropped);
     }
     for (const h of chunk.hazards) {
-      const i = this.hazards.indexOf(h);
-      if (i >= 0) this.hazards.splice(i, 1);
+      h.dropped = true;
       h.geo?.dispose();
     }
+    if (chunk.hazards.length) {
+      this.hazards = this.hazards.filter((h) => !h.dropped);
+    }
     chunk.group.traverse((o) => {
+      // Instanced vegetation shares one geometry and material across every
+      // chunk — free its instance buffers, but leave the shared assets alone.
       if (o.isInstancedMesh) o.dispose();
+      else if (o.isMesh) o.geometry?.dispose();
     });
     chunk.group.removeFromParent();
     this.chunks.delete(key);
@@ -406,6 +423,7 @@ export class ChunkWorld {
         if (o.material && !Array.isArray(o.material)) o.material.dispose();
       }
     });
+    this.batch.dispose();
     this.facade.dispose();
     this.trunkGeo.dispose();
     this.leafGeo.dispose();

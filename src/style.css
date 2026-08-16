@@ -1,9 +1,22 @@
+/* ==========================================================================
+   Palette
+   ==========================================================================
+   Taken from an instrument panel, not from a dark-mode template. The accent is
+   radium lume — the slightly sickly yellow-green that real dial markings were
+   painted with — over instrument black, with redline lacquer for warnings and
+   brass for the throttle. A mint or cyan HUD would read as generic sci-fi; this
+   reads as 1943.
+*/
 :root {
-  --hud: #8ef2c4;
-  --hud-dim: rgba(142, 242, 196, 0.45);
-  --warn: #ff5f4a;
-  --amber: #ffc247;
-  --ink: #06110d;
+  --hud-rgb: 205, 224, 106;
+  --hud: rgb(var(--hud-rgb));           /* radium lume */
+  --hud-dim: rgba(var(--hud-rgb), 0.45);
+  --warn: #e8542e;                       /* redline lacquer */
+  --amber: #e8a13c;                      /* signal amber */
+  --brass: #b08d4f;                      /* throttle knob */
+  --panel: #131719;                      /* instrument black */
+  --panel-lip: #23292c;                  /* the lit top edge of stamped metal */
+  --ink: #0d1105;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +39,7 @@ html, body {
   inset: 0;
   pointer-events: none;
   padding: clamp(12px, 2.2vw, 28px);
-  text-shadow: 0 0 8px rgba(50, 255, 170, 0.35);
+  text-shadow: 0 0 8px rgba(var(--hud-rgb), 0.30);
   transition: opacity 200ms ease;
 }
 
@@ -78,7 +91,7 @@ html, body {
   height: 100%;
   width: 70%;
   background: var(--hud);
-  box-shadow: 0 0 10px rgba(80, 255, 180, 0.6);
+  box-shadow: 0 0 10px rgba(var(--hud-rgb), 0.55);
   transition: width 90ms linear;
 }
 
@@ -90,10 +103,10 @@ html, body {
   border: 1px solid var(--warn);
   padding: 3px 9px;
   opacity: 0;
-  text-shadow: 0 0 10px rgba(255, 90, 70, 0.7);
+  text-shadow: 0 0 10px rgba(232, 84, 46, 0.7);
 }
 .warn.on { animation: blink 620ms steps(1) infinite; }
-.warn.brake { color: var(--amber); border-color: var(--amber); text-shadow: 0 0 10px rgba(255, 190, 70, 0.6); }
+.warn.brake { color: var(--amber); border-color: var(--amber); text-shadow: 0 0 10px rgba(232, 161, 60, 0.6); }
 .warn.brake.on { animation: none; opacity: 1; }
 
 @keyframes blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.08; } }
@@ -158,11 +171,11 @@ html, body {
   top: 50%;
   height: 3px;
   background: var(--hud);
-  box-shadow: 0 0 8px rgba(80, 255, 180, 0.8);
+  box-shadow: 0 0 8px rgba(var(--hud-rgb), 0.8);
   transform: translateY(-50%);
   transition: top 110ms linear;
 }
-.ap-mark.off { background: var(--warn); box-shadow: 0 0 8px rgba(255, 90, 70, 0.8); }
+.ap-mark.off { background: var(--warn); box-shadow: 0 0 8px rgba(232, 84, 46, 0.8); }
 
 .reticle {
   position: absolute;
@@ -189,8 +202,8 @@ html, body {
   line-height: 1.5;
 }
 .banner.show { opacity: 1; }
-.banner.bad { color: var(--warn); text-shadow: 0 0 24px rgba(255, 80, 60, 0.6); }
-.banner.good { color: var(--amber); text-shadow: 0 0 24px rgba(255, 190, 70, 0.6); }
+.banner.bad { color: var(--warn); text-shadow: 0 0 24px rgba(232, 84, 46, 0.6); }
+.banner.good { color: var(--amber); text-shadow: 0 0 24px rgba(232, 161, 60, 0.6); }
 .banner small { display: block; font-size: 0.4em; letter-spacing: 0.24em; color: var(--hud-dim); margin-top: 1.4em; }
 
 /* ---------- menu ---------- */
@@ -211,7 +224,7 @@ html, body {
 .panel {
   width: min(920px, 96vw);
   padding: clamp(22px, 3.4vw, 38px);
-  border: 1px solid rgba(142, 242, 196, 0.28);
+  border: 1px solid rgba(var(--hud-rgb), 0.28);
   background: rgba(4, 14, 12, 0.72);
   box-shadow: 0 0 60px rgba(0, 0, 0, 0.6), inset 0 0 60px rgba(30, 120, 90, 0.08);
 }
@@ -237,11 +250,11 @@ html, body {
   font: inherit;
   color: inherit;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(142, 242, 196, 0.22);
+  border: 1px solid rgba(var(--hud-rgb), 0.22);
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
 }
-.map-card:hover { border-color: var(--hud); background: rgba(142, 242, 196, 0.08); transform: translateY(-2px); }
+.map-card:hover { border-color: var(--hud); background: rgba(var(--hud-rgb), 0.08); transform: translateY(-2px); }
 .map-card:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .map-card.active { border-color: var(--amber); }
 
@@ -256,7 +269,7 @@ html, body {
 
 .map-blurb { margin: 0; font-size: 11px; line-height: 1.6; color: var(--hud-dim); }
 
-.ctrl-details { margin-top: 22px; border-top: 1px solid rgba(142, 242, 196, 0.18); padding-top: 14px; }
+.ctrl-details { margin-top: 22px; border-top: 1px solid rgba(var(--hud-rgb), 0.18); padding-top: 14px; }
 .ctrl-details summary {
   cursor: pointer;
   font-size: 12px;
@@ -279,14 +292,14 @@ kbd {
   min-width: 2em;
   padding: 2px 6px;
   margin-right: 4px;
-  border: 1px solid rgba(142, 242, 196, 0.35);
+  border: 1px solid rgba(var(--hud-rgb), 0.35);
   border-radius: 3px;
   font: inherit;
   font-size: 11px;
   text-align: center;
 }
 
-.hint { color: rgba(142, 242, 196, 0.4); font-size: 11px; line-height: 1.8; margin: 16px 0 0; }
+.hint { color: rgba(var(--hud-rgb), 0.4); font-size: 11px; line-height: 1.8; margin: 16px 0 0; }
 
 /* ==========================================================================
    Warbird additions: modes, shop, lobby, scope, kill feed
@@ -305,11 +318,11 @@ kbd {
   height: 100%;
   width: 100%;
   background: var(--hud);
-  box-shadow: 0 0 10px rgba(80, 255, 180, 0.55);
+  box-shadow: 0 0 10px rgba(var(--hud-rgb), 0.55);
   transition: width 180ms ease, background 200ms ease;
 }
-.hp-fill.mid { background: var(--amber); box-shadow: 0 0 10px rgba(255, 190, 70, 0.55); }
-.hp-fill.low { background: var(--warn); box-shadow: 0 0 10px rgba(255, 90, 70, 0.6); }
+.hp-fill.mid { background: var(--amber); box-shadow: 0 0 10px rgba(232, 161, 60, 0.55); }
+.hp-fill.low { background: var(--warn); box-shadow: 0 0 10px rgba(232, 84, 46, 0.6); }
 
 .warn.dmg { color: var(--warn); border-color: var(--warn); }
 
@@ -480,11 +493,11 @@ kbd {
   font: inherit;
   color: inherit;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(142, 242, 196, 0.22);
+  border: 1px solid rgba(var(--hud-rgb), 0.22);
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
 }
-.mode-card:hover { border-color: var(--hud); background: rgba(142, 242, 196, 0.08); transform: translateY(-2px); }
+.mode-card:hover { border-color: var(--hud); background: rgba(var(--hud-rgb), 0.08); transform: translateY(-2px); }
 .mode-card:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .mode-tag { font-size: 9px; letter-spacing: 0.26em; color: var(--amber); text-transform: uppercase; }
 .mode-name { font-size: 21px; letter-spacing: 0.1em; }
@@ -502,7 +515,7 @@ kbd {
   letter-spacing: 0.12em;
   color: var(--hud-dim);
   background: transparent;
-  border: 1px solid rgba(142, 242, 196, 0.25);
+  border: 1px solid rgba(var(--hud-rgb), 0.25);
   cursor: pointer;
 }
 .dur:hover { color: var(--hud); border-color: var(--hud); }
@@ -518,7 +531,7 @@ kbd {
   letter-spacing: 0.16em;
   color: var(--hud-dim);
   background: transparent;
-  border: 1px solid rgba(142, 242, 196, 0.22);
+  border: 1px solid rgba(var(--hud-rgb), 0.22);
   cursor: pointer;
 }
 .tab:hover { color: var(--hud); }
@@ -531,9 +544,9 @@ kbd {
   flex-direction: column;
   padding: 16px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(142, 242, 196, 0.2);
+  border: 1px solid rgba(var(--hud-rgb), 0.2);
 }
-.shop-card.equipped { border-color: var(--amber); box-shadow: inset 0 0 30px rgba(255, 194, 71, 0.06); }
+.shop-card.equipped { border-color: var(--amber); box-shadow: inset 0 0 30px rgba(232, 161, 60, 0.06); }
 
 .shop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .shop-title { font-size: 16px; letter-spacing: 0.08em; }
@@ -544,7 +557,7 @@ kbd {
 .stat { display: grid; grid-template-columns: 9.2em 1fr 5.4em; align-items: center; gap: 8px; font-size: 10.5px; }
 .stat-label { white-space: nowrap; }
 .stat-label { color: var(--hud-dim); letter-spacing: 0.06em; }
-.stat-track { height: 5px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(142, 242, 196, 0.18); }
+.stat-track { height: 5px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(var(--hud-rgb), 0.18); }
 .stat-fill { display: block; height: 100%; background: var(--hud); opacity: 0.75; }
 .stat-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--hud); }
 
@@ -568,11 +581,11 @@ kbd {
   text-transform: none;
   color: var(--hud);
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(142, 242, 196, 0.25);
+  border: 1px solid rgba(var(--hud-rgb), 0.25);
 }
 .field input:focus, .field select:focus { outline: none; border-color: var(--hud); }
 .field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
-.field.checkbox input { accent-color: #8ef2c4; }
+.field.checkbox input { accent-color: var(--hud); }
 
 .lobby-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
 .lobby-list .empty { color: var(--hud-dim); font-size: 12px; }
@@ -580,7 +593,7 @@ kbd {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(142, 242, 196, 0.18);
+  border: 1px solid rgba(var(--hud-rgb), 0.18);
 }
 .lobby-info { display: flex; flex-direction: column; gap: 3px; }
 .lobby-name { font-size: 14px; }
@@ -602,10 +615,479 @@ kbd {
 .result-row {
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 9px 2px;
-  border-bottom: 1px solid rgba(142, 242, 196, 0.12);
+  border-bottom: 1px solid rgba(var(--hud-rgb), 0.12);
   font-size: 13px;
 }
 .result-row span { color: var(--hud-dim); letter-spacing: 0.1em; }
 .result-row b { font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .result-row.payout { border-bottom: 0; margin-top: 8px; }
 .result-row.payout b { color: var(--amber); font-size: 22px; }
+
+/* ==========================================================================
+   Touch controls
+   ==========================================================================
+   The mobile layer is cockpit furniture: a slotted throttle quadrant with a
+   brass knob, a stick with no fixed base, and panel-mounted switches. Controls
+   are engraved rather than drawn — a light top edge and a dark bottom edge, the
+   way a stamped metal panel catches light.
+
+   Everything is sized in `min()` against both viewport axes so a small phone in
+   landscape gets proportionally smaller furniture rather than a cropped layout,
+   and every control clears the notch via env(safe-area-inset-*).
+*/
+
+#touch {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  /* the browser must not claim any gesture inside here */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: none;
+}
+
+#touch[hidden] { display: none; }
+#touch > * { pointer-events: auto; }
+
+/* ---------- the stick: the whole right side, no visible base ---------- */
+
+#t-stick {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  /* stops short of the throttle so a wide thumb sweep never grabs the lever */
+  left: 34%;
+  touch-action: none;
+}
+
+#t-stick-ring {
+  position: absolute;
+  width: min(30vh, 168px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+
+#t-stick-ring.on { opacity: 1; }
+
+#t-stick-ring svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--hud-dim);
+  stroke-width: 1.2;
+}
+
+#t-stick-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 15%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--hud);
+  box-shadow: 0 0 14px rgba(var(--hud-rgb), 0.65);
+  /* no transition: the dot must track the thumb exactly, and any easing here
+     reads as input lag on the control you are steering with */
+}
+
+/* ---------- throttle quadrant: the signature ---------- */
+
+.t-quad-wrap {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + min(3.2vw, 26px));
+  /* clears the rudder rocker below it */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + min(21vh, 104px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+#t-quadrant {
+  position: relative;
+  width: min(9vh, 52px);
+  height: min(30vh, 168px);
+  touch-action: none;
+  /* the housing: a milled block with a slot cut down the middle */
+  background: linear-gradient(180deg, #1c2124 0%, var(--panel) 42%, #0d1113 100%);
+  border: 1px solid #2c3336;
+  border-top-color: var(--panel-lip);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    0 3px 14px rgba(0, 0, 0, 0.5);
+}
+
+#t-quadrant.held { border-color: rgba(var(--hud-rgb), 0.5); }
+
+/* the slot the lever rides in */
+.t-gate {
+  position: absolute;
+  left: 50%;
+  top: 9px;
+  bottom: 9px;
+  width: 7px;
+  translate: -50% 0;
+  background: #06090a;
+  border-radius: 4px;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.95);
+}
+
+/* engraved gate marks at the quarters — the etched-metal treatment */
+.t-detents {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 9px;
+  bottom: 9px;
+  pointer-events: none;
+}
+
+.t-detents i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #454f53;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.75);
+}
+
+.t-detents i:first-child,
+.t-detents i:last-child { background: #6a767a; }
+
+#t-lever {
+  position: absolute;
+  left: 50%;
+  bottom: 70%;
+  width: 100%;
+  height: 0;
+  translate: -50% 0;
+  pointer-events: none;
+}
+
+/* the knob itself: brass, because on a real quadrant it is the one part your
+   hand touches and the one part that is not painted black */
+.t-knob {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 132%;
+  height: min(4.4vh, 26px);
+  translate: -50% 50%;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #d8b877 0%, var(--brass) 46%, #6d5730 100%);
+  border: 1px solid #4e3f22;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+/* the lume index line across the knob — where the setting is actually read */
+.t-knob::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 2px;
+  translate: 0 -50%;
+  background: var(--hud);
+  box-shadow: 0 0 6px rgba(var(--hud-rgb), 0.7);
+}
+
+.t-quad-label {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  color: var(--hud-dim);
+  /* the wrap is only as wide as the quadrant, so the caption must overflow it
+     rather than wrap onto a second line */
+  white-space: nowrap;
+}
+
+.t-quad-label b {
+  color: var(--hud);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- buttons: panel-mounted, engraved caps ---------- */
+
+.t-btn {
+  font-family: inherit;
+  color: var(--hud);
+  background: linear-gradient(180deg, #1e2427 0%, var(--panel) 60%, #0c1012 100%);
+  border: 1px solid #2c3336;
+  border-top-color: var(--panel-lip);
+  border-radius: 4px;
+  letter-spacing: 0.18em;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.45);
+  transition: border-color 90ms ease, background 90ms ease;
+}
+
+.t-btn.held {
+  border-color: var(--hud);
+  background: linear-gradient(180deg, #2b3325 0%, #1a1f16 100%);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
+}
+
+.t-btn.lit {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* rudder rocker, under the quadrant */
+
+.t-rudder {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + min(2vw, 12px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + min(2.5vh, 14px));
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 7px;
+  align-items: center;
+}
+
+.t-rud {
+  width: min(11vh, 56px);
+  height: min(11vh, 46px);
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+
+.t-rud-label {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  color: var(--hud-dim);
+}
+
+/* guns and bomb release */
+
+.t-fire {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + min(3vw, 24px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + min(4vh, 26px));
+  display: flex;
+  align-items: flex-end;
+  gap: min(2.4vw, 18px);
+}
+
+.t-fire .t-btn {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  border-radius: 50%;
+  aspect-ratio: 1;
+}
+
+.t-guns {
+  width: min(17vh, 96px);
+  border-color: rgba(var(--hud-rgb), 0.45);
+}
+
+.t-bomb {
+  width: min(13vh, 74px);
+  color: var(--amber);
+  border-color: rgba(232, 161, 60, 0.4);
+}
+
+.t-glyph { font-size: 18px; line-height: 1; }
+.t-cap { font-size: 8px; letter-spacing: 0.22em; }
+
+/* small panel switches, top right, deliberately out of thumb sweep */
+
+.t-switches {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + min(3vw, 24px));
+  top: calc(env(safe-area-inset-top, 0px) + min(2vh, 16px));
+  display: flex;
+  gap: 6px;
+}
+
+.t-sw {
+  padding: 7px 9px;
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+}
+
+/* ==========================================================================
+   Landscape nag
+   ========================================================================== */
+
+#rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #080c0f;
+  text-align: center;
+}
+
+#rotate[hidden] { display: none; }
+
+.rotate-inner { max-width: 320px; }
+
+.rotate-inner svg {
+  width: 74px;
+  height: 74px;
+  fill: none;
+  stroke: var(--hud-dim);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  animation: tip 2.6s ease-in-out infinite;
+}
+
+@keyframes tip {
+  0%, 40% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(-90deg); }
+}
+
+.rotate-inner h2 {
+  margin: 20px 0 10px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.rotate-inner p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--hud-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-inner svg { animation: none; transform: rotate(-90deg); }
+}
+
+/* ==========================================================================
+   Small screens
+   ==========================================================================
+   The menus were laid out for a desktop window. On a phone in landscape there
+   is roughly 380px of height to work with, so panels scroll, cards go
+   single-column, and every tap target grows to 44px.
+*/
+
+@media (max-width: 820px), (max-height: 520px) {
+  #overlay { padding: 0; }
+
+  .panel,
+  .panel.wide {
+    width: 100%;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top, 0px) + 18px)
+             calc(env(safe-area-inset-right, 0px) + 18px)
+             calc(env(safe-area-inset-bottom, 0px) + 18px)
+             calc(env(safe-area-inset-left, 0px) + 18px);
+    border: 0;
+  }
+
+  .panel h1 { font-size: 26px; }
+  .sub { margin: 8px 0 16px; font-size: 11px; }
+
+  .modes,
+  .shop-grid { grid-template-columns: 1fr; gap: 10px; }
+  .maps { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+
+  .btn { padding: 13px 20px; min-height: 44px; }
+  .btn.small { min-height: 38px; }
+  .tab, .dur { min-height: 40px; padding: 9px 16px; }
+
+  .mode-card, .map-card, .shop-card { padding: 14px; }
+  .mode-name { font-size: 18px; }
+
+  /* the desktop keyboard legend is noise when there is no keyboard */
+  .br .keys { display: none; }
+
+  .wallet { top: calc(env(safe-area-inset-top, 0px) + 10px); }
+
+  /* HUD gauges shrink and pull in from the notch */
+  #hud { padding: 10px; }
+  .tl { top: calc(env(safe-area-inset-top, 0px) + 8px); left: calc(env(safe-area-inset-left, 0px) + 10px); }
+  .tr { top: calc(env(safe-area-inset-top, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 10px); }
+  .gauge .value { font-size: 15px; min-width: 2.6em; }
+  .gauge { font-size: 9px; gap: 5px; }
+  .gauge .label { min-width: 2.8em; }
+  .gauge .unit { min-width: 1.8em; }
+
+  .approach { width: 112px; padding: 8px; left: auto; right: calc(env(safe-area-inset-right, 0px) + 10px); }
+  .banner { font-size: clamp(18px, 5vw, 30px); }
+  .killfeed { font-size: 10px; }
+}
+
+/* ==========================================================================
+   Touch mode HUD
+   ==========================================================================
+   The physical controls now occupy the bottom corners, so anything the HUD drew
+   there has to move or go. The throttle readout is redundant — it is printed on
+   the quadrant — but the airframe bar and the stall warning are not, so they
+   move up under the gauges rather than being dropped.
+*/
+
+body.touch-mode .br { display: none; }
+body.touch-mode .throttle { display: none; }
+
+body.touch-mode .bl {
+  top: calc(env(safe-area-inset-top, 0px) + 84px);
+  bottom: auto;
+  left: calc(env(safe-area-inset-left, 0px) + 10px);
+}
+
+/* The switch row owns the top-right corner, so the ammo/score readout drops
+   below it rather than printing underneath the buttons. */
+body.touch-mode .tr {
+  top: calc(env(safe-area-inset-top, 0px) + 44px);
+}
+
+body.touch-mode .tr .gauge .value { font-size: 13px; }
+body.touch-mode .mapname { display: none; }
+
+body.touch-mode .hp-bar { width: 108px; }
+body.touch-mode .warn-row { margin-top: 8px; }
+body.touch-mode .warn { font-size: 10px; letter-spacing: 0.18em; padding: 2px 6px; }
+
+/* the clock sits top-centre, clear of both the notch and the switches */
+body.touch-mode .modebar {
+  bottom: auto;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+}
+
+/* ---------- controls screen sections ---------- */
+
+.section-head {
+  margin: 22px 0 4px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+
+.section-head:first-of-type { margin-top: 16px; }
+
+.quality-note {
+  margin: -8px 0 4px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--hud-dim);
+}

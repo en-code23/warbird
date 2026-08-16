@@ -21,6 +21,7 @@ const MAX_SHOTS_PER_FRAME = 14;
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _scorch = new THREE.Color();
 const _q = new THREE.Vector3();
 const _m = new THREE.Vector3();
 
@@ -275,6 +276,28 @@ export class Weapons {
       }
     }
 
+    // --- anti-aircraft batteries ---
+    // Tested before the softer targets so strafing a gun emplacement always
+    // registers on the gun rather than on a pedestrian standing behind it.
+    if (ctx.world.flak) {
+      const site = ctx.world.flak.rayHit(origin, dir, bestT);
+      if (site) {
+        bestT = site.t;
+        hitKind = 'flak';
+        hitRef = site.battery;
+      }
+    }
+
+    // --- vehicles ---
+    if (ctx.world.vehicles) {
+      const car = ctx.world.vehicles.rayHit(origin, dir, bestT);
+      if (car) {
+        bestT = car.t;
+        hitKind = 'vehicle';
+        hitRef = car.index;
+      }
+    }
+
     // --- pedestrians ---
     if (ctx.pedestrians) {
       const ped = ctx.pedestrians.rayHit(origin, dir, bestT);
@@ -315,6 +338,16 @@ export class Weapons {
         ctx.pedestrians.kill(hitRef, _p);
         ctx.onHit?.({ kind: 'pedestrian', point: _p });
         break;
+      case 'vehicle':
+        ctx.world.vehicles.destroy(hitRef);
+        ctx.onHit?.({ kind: 'vehicle', point: _p });
+        break;
+      case 'flak':
+        this.effects.spark(_p, _q.set(0, 7, 0), 0.5, 0.3);
+        if (ctx.world.flak.hit(hitRef, gun.damage)) {
+          ctx.onHit?.({ kind: 'flak', point: _p });
+        }
+        break;
       case 'ground':
         this.effects.puff(_p, { r0: 0.4, r1: 2.6, life: 0.6, opacity: 0.3 });
         break;
@@ -324,10 +357,12 @@ export class Weapons {
   _damageBuilding(b, damage, point, ctx) {
     b.hp -= damage;
 
-    // scorch the facade as it takes punishment
+    // Scorch the facade as it takes punishment. Buildings share one instanced
+    // mesh now, so this is a per-instance colour write rather than a material
+    // edit — see buildings.js.
     const wear = THREE.MathUtils.clamp(1 - b.hp / b.maxHp, 0, 1);
-    if (b.mesh.material.color && wear > 0.05) {
-      b.mesh.material.color.copy(b.baseColor).multiplyScalar(1 - wear * 0.45);
+    if (wear > 0.05) {
+      b.setTint(_scorch.copy(b.baseColor).multiplyScalar(1 - wear * 0.45));
     }
 
     this.effects.puff(point, { r0: 0.3, r1: 2.2, life: 0.5, opacity: 0.35 });

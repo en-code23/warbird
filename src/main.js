@@ -13,6 +13,8 @@ import { Net } from './net.js';
 import { Economy } from './economy.js';
 import { formatClock } from './modes.js';
 import { planeById } from './catalog.js';
+import { TIERS, Governor, detectTier, guessTier, storeTier, isTouchDevice } from './quality.js';
+import { TouchControls, setupOrientation, goFullscreen } from './touch.js';
 
 /* ==========================================================================
    Constants
@@ -44,16 +46,45 @@ const DEG = 180 / Math.PI;
    Renderer / scene
    ========================================================================== */
 
+/* ---------- quality ---------- */
+
+const touchDevice = isTouchDevice();
+
+/** `auto` means "let the governor decide"; anything else is the player's call. */
+let tierPref = detectTier();
+let tierName = tierPref === 'auto' ? guessTier() : tierPref;
+let quality = { ...TIERS[tierName] };
+
 const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({
-  canvas, antialias: true, powerPreference: 'high-performance'
+  canvas,
+  antialias: quality.antialias,
+  powerPreference: 'high-performance',
+  // The default depth+stencil buffer costs bandwidth on tiled mobile GPUs and
+  // nothing here uses the stencil.
+  stencil: false,
+  // Never allocate a preserved buffer: it forces the driver to keep a full
+  // extra copy of every frame.
+  preserveDrawingBuffer: false
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
+
+/**
+ * Render scale is the governor's main lever. It multiplies the tier's pixel
+ * ratio cap, so a phone can drop to 0.6x resolution before anything visible
+ * gets turned off — resolution is the cheapest thing to give up in motion and
+ * the most expensive thing to keep, because fragment cost is quadratic in it.
+ */
+let renderScale = 1;
+
+function applyResolution() {
+  const ratio = Math.min(devicePixelRatio, quality.maxPixelRatio) * renderScale;
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0xbcd4e2, 0.00052);
@@ -67,8 +98,9 @@ const skyUniforms = {
   sun: { value: new THREE.Vector3(0.42, 0.62, -0.66).normalize() }
 };
 
+const SKY_RADIUS = 4500;
 const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(4500, 32, 20),
+  new THREE.SphereGeometry(SKY_RADIUS, 32, 20),
   new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -100,22 +132,55 @@ scene.add(sky);
 
 const SUN_DIR = new THREE.Vector3(0.42, 0.62, -0.66).normalize();
 const sun = new THREE.DirectionalLight(0xfff2dc, 2.5);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 1000;
 sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.6;
-{
-  const c = sun.shadow.camera;
-  c.left = -260; c.right = 260; c.top = 260; c.bottom = -260;
-  c.updateProjectionMatrix();
-}
 scene.add(sun, sun.target);
 
 const hemi = new THREE.HemisphereLight(0xbdd7ef, 0x4a5a3a, 1.15);
 const ambient = new THREE.AmbientLight(0xffffff, 0.18);
 scene.add(hemi, ambient);
+
+/**
+ * Pushes the current tier into the renderer, lights and camera.
+ *
+ * Shadows are the expensive one: with them on, every building is drawn a second
+ * time into the depth map. Turning them off roughly halves the draw calls,
+ * which is why the low tier does exactly that rather than just shrinking the
+ * map. Called on boot, on a tier change, and after each world build.
+ */
+function applyQuality() {
+  renderer.shadowMap.enabled = quality.shadows;
+  renderer.shadowMap.type = quality.shadowMapSize >= 2048
+    ? THREE.PCFSoftShadowMap
+    : THREE.PCFShadowMap;
+  renderer.toneMapping = quality.toneMapping
+    ? THREE.ACESFilmicToneMapping
+    : THREE.NoToneMapping;
+
+  sun.castShadow = quality.shadows;
+  if (quality.shadows) {
+    sun.shadow.mapSize.set(quality.shadowMapSize, quality.shadowMapSize);
+    const d = quality.shadowDistance;
+    const c = sun.shadow.camera;
+    c.left = -d; c.right = d; c.top = d; c.bottom = -d;
+    c.updateProjectionMatrix();
+    // a resized map has to be thrown away or three keeps rendering the old one
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+
+  camera.far = quality.drawDistance;
+  camera.updateProjectionMatrix();
+
+  // The sky is real geometry, so a shortened far plane clips straight through
+  // it and leaves a black void across most of the view. Keep the dome just
+  // inside the far plane whatever the draw distance is.
+  sky.scale.setScalar((quality.drawDistance * 0.86) / SKY_RADIUS);
+  effects?.setBudget(quality.particleScale);
+  applyResolution();
+}
 
 /* ==========================================================================
    Services
@@ -133,7 +198,7 @@ const weapons = new Weapons(scene, effects, audio);
 const sight = new THREE.Mesh(
   new THREE.RingGeometry(4.2, 5.4, 32),
   new THREE.MeshBasicMaterial({
-    color: 0x8ef2c4, transparent: true, opacity: 0.8,
+    color: 0xcde06a, transparent: true, opacity: 0.8,
     depthWrite: false, depthTest: false,
     side: THREE.DoubleSide, blending: THREE.AdditiveBlending
   })
@@ -178,6 +243,8 @@ const session = {
   kills: 0,
   deaths: 0,
   landings: 0,
+  flak: 0,
+  flakWarned: false,
   running: false
 };
 
@@ -228,7 +295,9 @@ function applyEnv(env) {
   skyUniforms.sun.value.copy(SUN_DIR);
 
   scene.fog.color.setHex(env.skyHorizon);
-  scene.fog.density = env.fogDensity;
+  // Thicker fog on low tiers hides the shortened draw distance instead of
+  // popping geometry in at the far plane.
+  scene.fog.density = env.fogDensity * quality.fogScale;
 
   sun.color.setHex(env.sunColor);
   sun.intensity = env.sunIntensity;
@@ -247,6 +316,8 @@ function teardownWorld() {
   world = null;
   burning.length = 0;
   fires.length = 0;
+  collapsing.length = 0;
+  rubble.length = 0;
   weapons.reset();
   effects.reset();
   clearRemotes();
@@ -270,15 +341,21 @@ function launch({ mode, map, duration, room }) {
   session.kills = 0;
   session.deaths = 0;
   session.landings = 0;
+  session.flak = 0;
+  session.flakWarned = false;
   session.running = true;
   session.room = room ?? null;
 
+  // The world builders read every population figure off the tier, so a phone
+  // gets a genuinely lighter city rather than the same city rendered worse.
+  const build = { ...quality, effects };
+
   if (mode.infinite) {
-    world = new ChunkWorld(scene);
+    world = new ChunkWorld(scene, build);
     world.update(new THREE.Vector3());
     applyEnv(FREEFLIGHT_ENV);
   } else {
-    world = createWorld(map);
+    world = createWorld(map, build);
     scene.add(world.group);
     applyEnv(map.env);
   }
@@ -287,22 +364,30 @@ function launch({ mode, map, duration, room }) {
   // crowds only exist where there are streets to walk
   if (world.streets) {
     pedestrians = new Pedestrians(scene, {
-      count: mode.infinite ? 120 : 260,
+      count: mode.infinite ? Math.round(quality.pedestrians * 0.5) : quality.pedestrians,
       grid: world.streets.grid,
       cell: world.streets.cell,
       half: world.streets.half,
       road: world.streets.road,
+      shadows: quality.shadows,
       effects
     });
   }
+
+  governor.reset();
+  governor.setTier(tierName);
 
   resetPlane();
   hud.show();
   hud.setMode(mode);
   running = true;
   last = performance.now();
+  nextFrameDue = 0;
   audio.start();
   audio.resume();
+  // Launching is a user gesture, which is the only moment the browser will
+  // grant fullscreen and an orientation lock.
+  goFullscreen();
 
   hud.banner(
     `${(map?.name ?? 'Free Flight').toUpperCase()}<small>${planeSpec.name} · ${economy.loadout.gun.name} · ${economy.loadout.bomb.name}</small>`,
@@ -320,6 +405,7 @@ function resetPlane() {
 
   state.speed = 0;
   state.throttle = 0.7;
+  touch.setThrottle(0.7);
   state.velocity.set(0, 0, 0);
   state.hp = state.maxHp;
   state.alive = true;
@@ -383,9 +469,34 @@ addEventListener('mouseup', (e) => {
 
 const axis = (neg, pos) => (keys[pos] ? 1 : 0) - (keys[neg] ? 1 : 0);
 
+/* ---------- touch ---------- */
+
+/**
+ * Touch and keyboard feed the same axes. The keyboard wins when a key is
+ * actually down, so plugging a keyboard into a tablet still works; otherwise
+ * the analogue touch value passes through untouched, which is what makes a
+ * landing flyable with a thumb.
+ */
+const touch = new TouchControls({
+  onFire: (on) => { weapons.trigger = on; },
+  onBomb: () => dropBomb(),
+  onView: () => setCockpit(!state.cockpit),
+  onScope: (on) => setScoped(on),
+  onMenu: () => openMenu()
+});
+
+setupOrientation();
+
+/** Keyboard axis, falling back to the touch axis when no key is held. */
+function mix(neg, pos, touchValue) {
+  const k = axis(neg, pos);
+  return k !== 0 ? k : touchValue;
+}
+
 function setScoped(on) {
   state.scoped = on;
   hud.setScoped(on);
+  touch.setScoped(on);
 }
 
 function setCockpit(on) {
@@ -411,6 +522,7 @@ function award(kind, n = 1) {
   if (kind === 'building') session.buildings += n;
   if (kind === 'pedestrian') session.peds += n;
   if (kind === 'kill') session.kills += n;
+  if (kind === 'flak') session.flak += n;
 }
 
 /* ==========================================================================
@@ -419,10 +531,14 @@ function award(kind, n = 1) {
 
 const burning = [];
 const fires = [];
+/** Buildings currently mid-collapse, so the frame loop never sweeps the city. */
+const collapsing = [];
+const rubble = [];
 const _v = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _hull = new THREE.Vector3();
 const _euler = new THREE.Euler();
+const _c = new THREE.Color();
 
 function dropBomb() {
   if (!state.alive) return;
@@ -457,6 +573,19 @@ function detonate(pos, spec) {
   if (pedestrians) {
     const killed = pedestrians.blast(pos, spec.blast * 1.15);
     if (killed) award('pedestrian', killed);
+  }
+
+  if (world.vehicles) {
+    const wrecked = world.vehicles.blast(pos, spec.blast * 1.1);
+    if (wrecked) award('vehicle', wrecked);
+  }
+
+  // Flak sites are tougher than a car but softer than a tower: anything inside
+  // the blast goes, which makes a heavy bomb a legitimate way to open a
+  // corridor through the defences.
+  if (world.flak) {
+    const silenced = world.flak.blast(pos, spec.blast * 0.9);
+    if (silenced) award('flak', silenced);
   }
 
   // incendiaries keep taking neighbours for a while after the hit
@@ -495,6 +624,7 @@ function demolish(b) {
   if (!b.alive) return;
   b.alive = false;
   b.collapse = 0.0001;
+  collapsing.push(b);
   award('building');
 
   const p = b.center;
@@ -507,25 +637,22 @@ function demolish(b) {
   if (burning.length < 18) burning.push({ bld: b, t: 0 });
 }
 
+/**
+ * This used to sweep every building in the world each frame to find the handful
+ * that were mid-collapse — 700 iterations to animate two. Buildings now join an
+ * active list when they are knocked down and leave it when they settle.
+ */
 function updateCollapses(dt) {
-  for (const b of world.buildings) {
-    if (b.collapse <= 0 || b.collapse >= 1) continue;
+  for (let i = collapsing.length - 1; i >= 0; i--) {
+    const b = collapsing[i];
     b.collapse = Math.min(1, b.collapse + dt * 0.85);
     const k = b.collapse;
-    const s = 1 - 0.88 * (k * k * (3 - 2 * k)); // smoothstep
+    const s = b.setCollapse(k);
     const base = b.min.y;
-
-    b.mesh.scale.y = s;
-    // it leans as it goes rather than sinking straight down
-    b.mesh.rotation.z = Math.sin(k * 4) * 0.05 * (1 - k);
-    b.mesh.rotation.x = Math.cos(k * 3.3) * 0.04 * (1 - k);
-    b.roof.position.y = base + b.height * s;
-    b.roof.scale.setScalar(1 - 0.25 * k);
-    b.max.y = base + b.height * s;
 
     if (b.extras) for (const e of b.extras) e.position.y = base + b.height * s + 6;
 
-    if (Math.random() < 14 * dt) {
+    if (Math.random() < 14 * dt * effects.budget) {
       effects.puff(
         _v.set(
           b.center.x + (Math.random() - 0.5) * b.size.x * 1.3,
@@ -536,10 +663,14 @@ function updateCollapses(dt) {
       );
     }
 
-    if (b.collapse >= 1) {
-      b.mesh.material.color.multiplyScalar(0.45);
-      b.roof.visible = false;
+    if (k >= 1) {
+      _c.copy(b.baseColor).multiplyScalar(0.45);
+      b.setTint(_c);
+      b.hideRoof();
       if (b.extras) for (const e of b.extras) e.visible = false;
+      // leave a heap behind rather than a stain
+      effects.dropRubble(b.center, b.size);
+      collapsing.splice(i, 1);
     }
   }
 
@@ -594,6 +725,8 @@ function crash(reason) {
 
   plane.group.visible = false;
   if (cockpit) cockpit.visible = false;
+  weapons.trigger = false;
+  touch.release();
   if (session.room) net.reportDeath(state.lastHitBy);
 
   hud.banner(`DOWN<small>${reason} — press R to respawn</small>`, 'bad', 999);
@@ -652,8 +785,15 @@ function updateFlight(dt) {
   up.copy(UP).applyQuaternion(q);
   right.copy(RIGHT).applyQuaternion(q);
 
-  state.throttle = clamp(state.throttle + axis('ArrowDown', 'ArrowUp') * 0.55 * dt, 0, 1);
-  state.braking = !!keys.KeyB && state.grounded;
+  // The touch quadrant sets throttle absolutely; the keyboard nudges it.
+  const thrKey = axis('ArrowDown', 'ArrowUp');
+  if (thrKey !== 0 || !touch.active) {
+    state.throttle = clamp(state.throttle + thrKey * 0.55 * dt, 0, 1);
+    if (touch.active) touch.setThrottle(state.throttle);
+  } else {
+    state.throttle = touch.throttle;
+  }
+  state.braking = (!!keys.KeyB || touch.braking) && state.grounded;
 
   // --- longitudinal ---
   const thrust = state.throttle * P.thrust;
@@ -661,11 +801,11 @@ function updateFlight(dt) {
   const slope = -GRAVITY * fwd.y * 0.85; // climbing bleeds speed, diving builds it
   state.speed = clamp(state.speed + (thrust - drag + slope) * dt, 0, P.maxSpeed);
 
-  // --- controls: W/S pitch, Q/E roll, A/D rudder ---
+  // --- controls: W/S pitch, Q/E roll, A/D rudder, or the touch stick ---
   const auth = clamp(state.speed / P.stall, 0, 1.25);
-  const pitch = axis('KeyW', 'KeyS');
-  const roll = axis('KeyE', 'KeyQ');
-  const yaw = axis('KeyD', 'KeyA');
+  const pitch = mix('KeyW', 'KeyS', touch.pitch);
+  const roll = mix('KeyE', 'KeyQ', touch.roll);
+  const yaw = mix('KeyD', 'KeyA', touch.yaw);
   state.pitchIn = pitch;
   state.rollIn = roll;
 
@@ -983,8 +1123,12 @@ function endSortie(reason) {
   session.running = false;
   running = false;
   weapons.trigger = false;
+  touch.release();
 
-  const coins = Math.round(session.score * 0.5);
+  // Half the score was too thin against the price list; see catalog.js for the
+  // retuned curve. Landings pay a flat completion bonus on top, so flying the
+  // aircraft home is worth more than one last pass over the city.
+  const coins = Math.round(session.score * 0.6) + (session.landings > 0 ? 120 : 0);
   economy.addCoins(coins);
   economy.record('sorties');
   economy.record('buildings', session.buildings);
@@ -999,6 +1143,7 @@ function endSortie(reason) {
       ['Score', session.score.toLocaleString('en-GB')],
       ['Buildings destroyed', String(session.buildings)],
       ['Casualties', String(session.peds)],
+      ['Flak batteries silenced', String(session.flak)],
       ...(session.mode.multiplayer
         ? [['Kills', String(session.kills)], ['Deaths', String(session.deaths)]]
         : []),
@@ -1011,6 +1156,7 @@ function endSortie(reason) {
 function openMenu() {
   running = false;
   weapons.trigger = false;
+  touch.release();
   hud.hide();
   ui.show('menu');
 }
@@ -1019,7 +1165,9 @@ function resumeFromMenu() {
   ui.hide();
   hud.show();
   last = performance.now();
+  nextFrameDue = 0;
   running = true;
+  governor.reset();
   audio.resume();
 }
 
@@ -1030,11 +1178,51 @@ function resumeFromMenu() {
 let last = performance.now();
 let running = false;
 
+/**
+ * Frame cap.
+ *
+ * A 120Hz phone will happily render 120fps and cook itself doing it, for no
+ * visible gain in a sim where the camera is smoothed anyway. Capping to 60
+ * roughly halves GPU power draw on those devices — the single most effective
+ * anti-overheating measure here after resolution.
+ */
+const FRAME_CAP = 1000 / 60;
+let nextFrameDue = 0;
+
+const governor = new Governor({
+  targetFps: 60,
+  onScale: (s) => {
+    renderScale = s;
+    applyResolution();
+  },
+  onTier: (t) => {
+    // The governor only ever steps down, and only after resolution has already
+    // bottomed out. Tell the player, because the picture visibly changes.
+    setTier(t, { auto: true });
+    hud.banner(
+      `GRAPHICS: ${TIERS[t].name.toUpperCase()}<small>lowered to hold the frame rate</small>`,
+      '',
+      2.6
+    );
+  }
+});
+
+const _flakTarget = { position: null, velocity: null, alive: true };
+
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000);
+
+  if (now < nextFrameDue) return;
+  // Schedule from the deadline rather than from now, so an early frame does not
+  // pull the whole cadence forward and the cap holds at a steady 60.
+  nextFrameDue = Math.max(now, nextFrameDue + FRAME_CAP);
+
+  const frameMs = now - last;
+  const dt = Math.min(0.05, frameMs / 1000);
   last = now;
   if (!running || dt <= 0 || !world) return;
+
+  governor.update(frameMs, dt);
 
   if (state.alive) updateFlight(dt);
   if (!world) return; // a crash during updateFlight can tear the world down
@@ -1056,6 +1244,8 @@ function frame(now) {
       onHit: (hit) => {
         if (hit.kind === 'building') demolish(hit.target);
         else if (hit.kind === 'pedestrian') award('pedestrian');
+        else if (hit.kind === 'vehicle') award('vehicle');
+        else if (hit.kind === 'flak') award('flak');
         else if (hit.kind === 'plane') net.reportHit(hit.target.id, hit.damage);
       }
     });
@@ -1071,9 +1261,32 @@ function frame(now) {
     weapons.bombs = weapons.maxBombs;
   }
 
+  // anti-aircraft fire
+  if (world.flak) {
+    _flakTarget.position = plane.group.position;
+    _flakTarget.velocity = state.velocity;
+    _flakTarget.alive = state.alive && !state.grounded;
+    world.flak.update(dt, _flakTarget, (amount) => {
+      // Being shot at by something you cannot see needs to be legible, so the
+      // first burst of a sortie says so explicitly and names the way out.
+      if (!session.flakWarned) {
+        session.flakWarned = true;
+        hud.banner(
+          'FLAK<small>get low or kill the guns — they cannot depress below the rooftops</small>',
+          'bad',
+          3
+        );
+      }
+      damage(amount, null, 'HIT BY FLAK');
+    });
+  }
+
   updateFires(dt);
   updateCollapses(dt);
   pedestrians?.update(dt, plane.group.position);
+  world.vehicles?.update(dt, plane.group.position);
+  // one instance-buffer upload per frame, and only if a building moved
+  world.batch?.flush();
   effects.update(dt);
   updateSight();
   syncRemotes(dt);
@@ -1156,22 +1369,76 @@ requestAnimationFrame(frame);
    Boot
    ========================================================================== */
 
+/**
+ * Switches quality tier.
+ *
+ * Population figures are baked into the world at build time, so a manual change
+ * only takes full effect on the next sortie; everything the renderer owns
+ * (resolution, shadows, tone mapping, draw distance) applies immediately, which
+ * is enough to recover a frame rate mid-flight.
+ *
+ * @param {string} name
+ * @param {object} opts  {auto} — an automatic step-down keeps the `auto`
+ *   preference, so the governor stays in charge; a manual pick pins it.
+ */
+function setTier(name, { auto = false } = {}) {
+  tierName = name;
+  quality = { ...TIERS[name] };
+  if (!auto) {
+    tierPref = name;
+    storeTier(name);
+  }
+  renderScale = 1;
+  applyQuality();
+  governor.setTier(name);
+  world?.batch?.setShadows(quality.shadows);
+  ui?.setTier?.(tierPref, tierName);
+}
+
+// Debounced, because the address bar hiding on a phone fires a storm of these
+// and each one reallocates the drawing buffer.
+let resizeTimer = 0;
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(applyResolution, 120);
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) running = false;
-  else if (!ui.visible && world) {
+  if (document.hidden) {
+    running = false;
+    touch.release();
+  } else if (!ui.visible && world) {
     last = performance.now();
+    nextFrameDue = 0;
     running = true;
+    governor.reset();
     audio.resume();
   }
 });
 
-const ui = new UI({ economy, net, onLaunch: launch });
+const ui = new UI({
+  economy,
+  net,
+  onLaunch: launch,
+  quality: {
+    tiers: TIERS,
+    get pref() { return tierPref; },
+    get active() { return tierName; },
+    set: (name) => {
+      if (name === 'auto') {
+        tierPref = 'auto';
+        storeTier('auto');
+        setTier(guessTier(), { auto: true });
+        ui.setTier?.(tierPref, tierName);
+      } else {
+        setTier(name);
+      }
+    }
+  }
+});
+
+applyQuality();
+if (touchDevice) touch.enable();
 
 /* ---------- multiplayer events that reach into the flight ---------- */
 
@@ -1195,6 +1462,9 @@ net.handle = ((original) => function patched(msg) {
 
 window.sim = {
   state, session, economy, net, weapons, effects, camera, scene, hud,
+  renderer, touch, governor,
+  get quality() { return { pref: tierPref, active: tierName, renderScale, ...quality }; },
+  setTier,
   get plane() { return plane; },
   get world() { return world; },
   get runway() { return runway; },

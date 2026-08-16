@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { BuildingBatch } from './buildings.js';
+import { Vehicles } from './vehicles.js';
+import { Flak, flakSites } from './flak.js';
 
 /**
  * Builds a playable world from a map definition (see maps.js) and tears it
@@ -89,7 +92,7 @@ function chaletFacade(g, S) {
   }
 }
 
-function facadeTexture(style) {
+function facadeTexture(style, anisotropy = 4) {
   const S = 256;
   const c = document.createElement('canvas');
   c.width = c.height = S;
@@ -100,7 +103,7 @@ function facadeTexture(style) {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = anisotropy;
   return tex;
 }
 
@@ -156,73 +159,13 @@ function cloudTexture() {
 /* ====================== geometry helpers ====================== */
 
 /**
- * BoxGeometry UVs are 0..1 per face. Scale each face's UVs so the facade tile
- * repeats at a constant world size instead of stretching with the building.
- * Face order: +X, -X, +Y, -Y, +Z, -Z (4 vertices each).
+ * Buildings live in a shared InstancedMesh pair (see buildings.js), so this is
+ * now a thin wrapper that claims a slot. The per-face UV tiling that used to
+ * happen here — `tileBoxUVs` — moved into the batch's vertex shader, because
+ * instances share one geometry and cannot each carry their own UVs.
  */
-function tileBoxUVs(geo, w, h, d, tile) {
-  const uv = geo.attributes.uv;
-  const spans = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
-  for (let f = 0; f < 6; f++) {
-    const su = Math.max(1, Math.round(spans[f][0] / tile));
-    const sv = Math.max(1, Math.round(spans[f][1] / tile));
-    for (let i = 0; i < 4; i++) {
-      const k = f * 4 + i;
-      uv.setXY(k, uv.getX(k) * su, uv.getY(k) * sv);
-    }
-  }
-  uv.needsUpdate = true;
-}
-
-function makeBuilding(x, z, w, d, h, opts) {
-  const geo = new THREE.BoxGeometry(w, h, d);
-  tileBoxUVs(geo, w, h, d, opts.tile);
-  geo.translate(0, h / 2, 0); // pivot at the base so collapse scales downward
-
-  const mesh = new THREE.Mesh(
-    geo,
-    new THREE.MeshStandardMaterial({
-      map: opts.map,
-      color: opts.color,
-      roughness: 0.85,
-      metalness: 0.02,
-      // On night maps the facade texture doubles as an emissive mask, so the
-      // window rectangles in it glow while the surrounding wall stays dark.
-      ...(opts.night && opts.map
-        ? { emissive: 0xffcb7a, emissiveMap: opts.map, emissiveIntensity: 0.55 }
-        : {})
-    })
-  );
-  mesh.position.set(x, 0, z);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(w * 1.04, opts.roofThickness ?? 0.8, d * 1.04),
-    opts.roofMat
-  );
-  roof.position.set(x, h, z);
-  roof.castShadow = true;
-
-  const maxHp = Math.round(40 + w * d * 0.35 + h * 5);
-
-  return {
-    mesh,
-    roof,
-    height: h,
-    size: new THREE.Vector3(w, h, d),
-    min: new THREE.Vector3(x - w / 2, 0, z - d / 2),
-    max: new THREE.Vector3(x + w / 2, h, z + d / 2),
-    center: new THREE.Vector3(x, h / 2, z),
-    alive: true,
-    collapse: 0,
-    // Structural strength scales with footprint and height, so a tower soaks up
-    // far more gunfire than a shed. Bomb blasts bypass this and destroy outright.
-    hp: maxHp,
-    maxHp,
-    baseColor: mesh.material.color.clone(),
-    burning: false
-  };
+function makeBuilding(batch, x, z, w, d, h, opts) {
+  return batch.create(x, z, w, d, h, opts);
 }
 
 function scatterInstances(count, geoA, matA, geoB, matB, placer) {
@@ -285,7 +228,7 @@ function vegetation(kind) {
 
 /* ====================== the builder ====================== */
 
-export function createWorld(map) {
+export function createWorld(map, quality) {
   const group = new THREE.Group();
   group.name = `world:${map.id}`;
   const buildings = [];
@@ -295,10 +238,19 @@ export function createWorld(map) {
   const CELL = t.block + t.road;
   const TOWN_HALF = (t.grid * CELL) / 2;
 
-  const facade = facadeTexture(t.style);
-  const roofMat = new THREE.MeshStandardMaterial({ color: t.roofColor, roughness: 0.95 });
+  const facade = facadeTexture(t.style, quality.anisotropy);
   const asphalt = new THREE.MeshStandardMaterial({ color: t.roadColor, roughness: 0.95 });
   const tile = t.style === 'office' ? 16 : 12;
+
+  // Up to four lots per block, plus slack for piers and one-off structures.
+  const batch = new BuildingBatch(group, {
+    capacity: t.grid * t.grid * 4 + 24,
+    map: facade,
+    tile,
+    roofColor: t.roofColor,
+    night: !!map.night,
+    shadows: quality.shadows
+  });
 
   /* ---------- ground ---------- */
   const ground = new THREE.Mesh(
@@ -361,7 +313,8 @@ export function createWorld(map) {
         lawn.receiveShadow = true;
         group.add(lawn);
         const [ga, ma, gb, mb] = vegetation(map.scatter?.[0]?.kind ?? 'tree');
-        for (const inst of scatterInstances(24, ga, ma, gb, mb, (p) =>
+        const treeCount = Math.max(4, Math.round(24 * quality.vegetationScale));
+        for (const inst of scatterInstances(treeCount, ga, ma, gb, mb, (p) =>
           p.set(
             bx + (Math.random() - 0.5) * t.block * 0.85,
             0,
@@ -387,15 +340,11 @@ export function createWorld(map) {
           const x = bx - t.block / 2 + step * (a + 0.5);
           const z = bz - t.block / 2 + step * (b + 0.5);
 
-          const bld = makeBuilding(x, z, w, d, h, {
-            map: facade,
+          const bld = makeBuilding(batch, x, z, w, d, h, {
             color: t.facades[(Math.random() * t.facades.length) | 0],
-            roofMat,
-            tile,
-            night: !!map.night,
             roofThickness: t.style === 'chalet' ? 1.6 : 0.8
           });
-          group.add(bld.mesh, bld.roof);
+          if (!bld) continue;
           buildings.push(bld);
 
           if (h > 45) {
@@ -493,18 +442,12 @@ export function createWorld(map) {
   for (let i = 0; i < (r.hangars ?? 1); i++) {
     const hp = toWorld(-20 + i * 34, -(r.width / 2 + 34));
     const [hw, hd] = localBox(22, 30);
-    const hangar = makeBuilding(hp.x, hp.z, hw, hd, 11, {
-      map: null,
+    const hangar = makeBuilding(batch, hp.x, hp.z, hw, hd, 11, {
       color: 0x6c7378,
-      roofMat,
-      tile
+      // the causeway field is raised, so hangars stand on the deck not the sea
+      baseY: deck
     });
-    hangar.min.y = deck;
-    hangar.max.y += deck;
-    hangar.mesh.position.y = deck;
-    hangar.roof.position.y = 11 + deck;
-    group.add(hangar.mesh, hangar.roof);
-    buildings.push(hangar);
+    if (hangar) buildings.push(hangar);
   }
 
   /* ---------- approach lights (PAPI) ---------- */
@@ -593,15 +536,10 @@ export function createWorld(map) {
       pier.receiveShadow = true;
       group.add(pier);
 
-      const shed = makeBuilding(px, map.water.at - 26, 30, 22, 12, {
-        map: facade,
-        color: 0x8d8577,
-        roofMat,
-        tile,
-        night: !!map.night
+      const shed = makeBuilding(batch, px, map.water.at - 26, 30, 22, 12, {
+        color: 0x8d8577
       });
-      group.add(shed.mesh, shed.roof);
-      buildings.push(shed);
+      if (shed) buildings.push(shed);
 
       // a ship alongside
       if (i % 2 === 0) {
@@ -626,7 +564,8 @@ export function createWorld(map) {
   for (const s of map.scatter ?? []) {
     const [ga, ma, gb, mb] = vegetation(s.kind);
     const [ox, oz] = s.offset ?? [0, 0];
-    for (const inst of scatterInstances(s.count, ga, ma, gb, mb, (p) => {
+    const count = Math.max(6, Math.round(s.count * quality.vegetationScale));
+    for (const inst of scatterInstances(count, ga, ma, gb, mb, (p) => {
       let x, z, tries = 0;
       do {
         x = (Math.random() - 0.5) * s.spread + ox;
@@ -655,7 +594,10 @@ export function createWorld(map) {
       depthWrite: false,
       fog: true
     });
-    for (let i = 0; i < cl.count; i++) {
+    // Clouds are big transparent sprites — pure overdraw, and the first thing
+    // worth cutting on a phone.
+    const cloudCount = Math.min(cl.count, quality.clouds);
+    for (let i = 0; i < cloudCount; i++) {
       const s = new THREE.Sprite(cloudMat);
       const k = 160 + Math.random() * 340;
       s.scale.set(k, k * (0.35 + Math.random() * 0.2), 1);
@@ -728,17 +670,47 @@ export function createWorld(map) {
     return null;
   };
 
+  /* ---------- traffic and defences ---------- */
+
+  const streets = { grid: t.grid, cell: CELL, half: TOWN_HALF, road: t.road };
+
+  const vehicles = quality.vehicles > 0
+    ? new Vehicles(group, {
+        count: quality.vehicles,
+        ...streets,
+        effects: quality.effects,
+        shadows: quality.shadows
+      })
+    : null;
+
+  // Defence density comes from the map: a sleepy farm town is not Steelworks.
+  const def = map.defences;
+  const flak = def
+    ? new Flak(group, {
+        sites: flakSites(TOWN_HALF, def.count, clearOfField),
+        range: def.range ?? 1250,
+        minHeight: def.minHeight ?? 55,
+        accuracy: def.accuracy ?? 0.55,
+        damage: def.damage ?? 16,
+        effects: quality.effects,
+        shadows: quality.shadows
+      })
+    : null;
+
   return {
     map,
     group,
+    batch,
     buildings,
     hazards,
+    vehicles,
+    flak,
     runway,
     surfaceAt,
     buildingAt,
     hazardAt,
-    /** street layout, so the crowd knows where the pavements are */
-    streets: { grid: t.grid, cell: CELL, half: TOWN_HALF, road: t.road }
+    /** street layout, so the crowd and the traffic know where the roads are */
+    streets
   };
 }
 
@@ -754,6 +726,8 @@ export function disposeWorld(world) {
     if (o.material) {
       for (const m of Array.isArray(o.material) ? o.material : [o.material]) materials.add(m);
     }
+    // instance matrix/colour buffers are not reachable through geometry
+    if (o.isInstancedMesh) o.dispose();
   });
 
   for (const m of materials) {

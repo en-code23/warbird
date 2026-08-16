@@ -31,11 +31,12 @@ export class UI {
   /**
    * @param {object} deps {economy, net, onLaunch, onResume}
    */
-  constructor({ economy, net, onLaunch, onResume }) {
+  constructor({ economy, net, onLaunch, onResume, quality }) {
     this.economy = economy;
     this.net = net;
     this.onLaunch = onLaunch;
     this.onResume = onResume;
+    this.quality = quality;
 
     this.root = $('overlay');
     this.screens = new Map();
@@ -55,10 +56,60 @@ export class UI {
     this.wireNav();
     this.wireShop();
     this.wireLobby();
+    this.buildQuality();
 
     economy.onChange(() => this.refreshWallet());
     this.refreshWallet();
     this.show('menu');
+  }
+
+  /* ================= graphics ================= */
+
+  /**
+   * Quality picker on the Controls screen.
+   *
+   * `Auto` is the default and the honest recommendation: the governor already
+   * measures the real frame time and steps down when it has to, which beats any
+   * guess made from a user-agent string. The manual tiers exist because
+   * someone on a laptop may prefer a locked-low picture to a fluctuating one.
+   */
+  buildQuality() {
+    const row = $('quality-opts');
+    if (!row || !this.quality) return;
+    this.qualityRow = row;
+    row.textContent = '';
+
+    const options = [['auto', 'Auto'], ...Object.entries(this.quality.tiers).map(
+      ([id, t]) => [id, t.name]
+    ).reverse()];
+
+    for (const [id, label] of options) {
+      const b = document.createElement('button');
+      b.className = 'dur';
+      b.dataset.tier = id;
+      b.textContent = label;
+      b.title = id === 'auto'
+        ? 'Measures the frame rate and lowers detail only when it has to.'
+        : this.quality.tiers[id].blurb;
+      b.addEventListener('click', () => this.quality.set(id));
+      row.appendChild(b);
+    }
+
+    this.setTier(this.quality.pref, this.quality.active);
+  }
+
+  /** @param {string} pref what the player chose  @param {string} active what is running */
+  setTier(pref, active) {
+    if (!this.qualityRow) return;
+    for (const b of this.qualityRow.children) {
+      b.classList.toggle('active', b.dataset.tier === pref);
+    }
+    const note = $('quality-note');
+    if (note) {
+      note.textContent = pref === 'auto'
+        ? `Auto — running ${this.quality.tiers[active].name.toLowerCase()} detail.`
+        : this.quality.tiers[pref].blurb;
+    }
   }
 
   /* ================= navigation ================= */

@@ -127,6 +127,18 @@ wss.on('connection', (ws) => {
   clients.add(client);
   send(ws, { t: 'welcome', id: client.id });
 
+  // A client only sends application messages during a running match. Someone
+  // sitting in a lobby waiting for a friend sends nothing at all, so without
+  // this they were reaped after TIMEOUT_MS and silently dropped — which is
+  // exactly the situation every real session starts in.
+  //
+  // Protocol-level pings are the right tool: the browser answers them in the
+  // network layer, so they keep working when the tab is backgrounded and its
+  // JavaScript timers are throttled.
+  ws.on('pong', () => {
+    client.lastSeen = Date.now();
+  });
+
   ws.on('message', (raw) => {
     client.lastSeen = Date.now();
     let msg;
@@ -281,10 +293,21 @@ wss.on('connection', (ws) => {
   });
 });
 
-/* reap dead connections */
+/* Keep connections alive, and reap the ones that have genuinely gone away. */
 setInterval(() => {
   const now = Date.now();
   for (const c of clients) {
-    if (now - c.lastSeen > TIMEOUT_MS) c.ws.terminate();
+    if (now - c.lastSeen > TIMEOUT_MS) {
+      c.ws.terminate();
+      continue;
+    }
+    // ping every sweep; the pong handler refreshes lastSeen
+    if (c.ws.readyState === c.ws.OPEN) {
+      try {
+        c.ws.ping();
+      } catch {
+        /* the close handler will clean up */
+      }
+    }
   }
 }, 10_000);

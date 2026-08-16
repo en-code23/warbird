@@ -2,8 +2,11 @@
 
 A browser flight simulator built on [three.js](https://threejs.org/). Fly a
 piston fighter — or a four-engine bomber, or a jet — over destructible cities.
-Bomb them, strafe them, land back on the strip, spend the coins on better
-aircraft, and shoot other people down.
+Bomb them, strafe them, dodge the flak, land back on the strip, spend the coins
+on better aircraft, and shoot other people down.
+
+Plays on a phone: landscape, with a throttle quadrant under your left thumb and
+the stick under your right.
 
 **Play it: <https://en-code23.github.io/warbird/>**
 
@@ -34,6 +37,24 @@ npm run server       # ws://localhost:8080
 
 ## Controls
 
+### Touch
+
+| Input | Action |
+| --- | --- |
+| **Right side of the screen** | The stick. Touch anywhere and drag — that point becomes centre |
+| **Left lever** | Throttle. Slide it up for power; it stays where you leave it |
+| **GUNS** | Hold to fire |
+| **BOMB** | Release one bomb |
+| **&#9664; &#9654;** | Rudder |
+| **SCOPE / VIEW / BRAKE / MENU** | Panel switches, top right |
+
+The stick has no fixed base on purpose: a virtual joystick pinned to one corner
+makes you look at your thumb to find it, and the thing you need to be looking at
+is the horizon. Deflection is squared, so small movements near centre are gentle
+— which is what makes a landing flyable with a thumb at all.
+
+### Keyboard
+
 | Input | Action |
 | --- | --- |
 | `W` / `S` | Pitch down / up |
@@ -58,9 +79,24 @@ supporting you and you sink, whatever the nose is doing.
 
 ### Strike — singleplayer
 
-A timed sortie against one city: 2, 5 or 10 minutes. Destroy as much as you can
-before the clock stops. Buildings score 10, casualties 2, a completed landing 25.
-Half the score is paid out as coins.
+A timed sortie against one **defended** city: 2, 5 or 10 minutes. Destroy as much
+as you can before the clock stops.
+
+| Target | Points |
+| --- | --- |
+| Building | 10 |
+| Flak battery | 60 |
+| Vehicle | 6 |
+| Casualty | 2 |
+| Completed landing | 25 |
+
+The flak is the point. Batteries track you, lead the shot and burst shells around
+you, and they are the only thing on the map that can kill you — so the sortie is
+a real decision rather than target practice. They cannot depress below the
+rooftops, so you can fly under them; they lead badly against a fast target, so
+you can outrun them; or you can suppress them first, which pays six buildings a
+gun. 60% of the score is paid out as coins, plus 120 for bringing the aircraft
+home.
 
 ### Free Flight — creative
 
@@ -189,6 +225,10 @@ lifecycle but does not simulate flight, and damage is reported by the shooting
 client. Fine among people who know each other; wide open to a modified client
 otherwise.
 
+A full two-client match has now been run end to end: connect, list, create a
+private lobby, reject a wrong password, join with the right one, host launch,
+live state sync, and a kill reaching both clients' scoreboards.
+
 ---
 
 ## Maps
@@ -207,6 +247,61 @@ the climb-out, so every field stays usable however the scenery rolls.
 
 ---
 
+## Performance, and why there is no Rust in here
+
+Mobile was the goal, so the sim was profiled before anything was rewritten. The
+result decided the whole approach:
+
+| | Before | After |
+| --- | --- | --- |
+| Draw calls / frame | **669** | **148** |
+| JS simulation / frame | 0.05 ms | 0.05 ms |
+
+The entire simulation — collision, the crowd, every ray test — costs **0.05 ms of
+a 16.7 ms frame**. It was never the bottleneck. The cost was 669 draw calls of
+driver overhead and fragment work at `devicePixelRatio` 2, and **neither of those
+is reachable from Rust or WebAssembly**: draw-call submission belongs to the
+browser and the GPU driver, and fill rate belongs to the GPU. A WASM rewrite
+could have won back a fraction of a millisecond and would have cost the
+zero-build-step deploy. So the fixes are where the time actually goes:
+
+- **Buildings are instanced.** Every building used to be a mesh plus a roof mesh;
+  a city was ~500 draw calls, doubled by the shadow pass. They now share two
+  `InstancedMesh`es, so a city is 2 draw calls at any size — see
+  [`src/buildings.js`](src/buildings.js). The per-face UV tiling that made this
+  awkward moved into the vertex shader and reads a per-instance size attribute.
+- **Resolution is the first thing given up.** Fragment cost is quadratic in pixel
+  ratio, so a phone at DPR 1 instead of 2 does a quarter of the shading work.
+- **The frame rate is capped at 60.** A 120 Hz phone will happily render 120 fps
+  and cook itself doing it, for no visible gain.
+- **Shadows are off on the low tier**, because they mean drawing the whole city a
+  second time into a depth map.
+- Chunk teardown in Free Flight was `indexOf` + `splice` per building — O(n²) and
+  a visible hitch every time a chunk dropped. It is a single mark-and-sweep now.
+
+### Quality tiers
+
+Set under **Controls**. `Auto` is the default and the honest recommendation: a
+governor watches real frame time and walks the render scale down before it drops
+a tier, because that is the cheapest thing to lose and the least noticeable in
+motion. It only ever steps down, with hysteresis so it settles instead of
+oscillating.
+
+| | Low | Medium | High |
+| --- | --- | --- | --- |
+| Max pixel ratio | 1.0 | 1.35 | 2.0 |
+| Shadows | off | 1024 | 2048 soft |
+| Antialiasing | off | off | on |
+| Pedestrians | 70 | 150 | 260 |
+| Vehicles | 26 | 60 | 110 |
+| Free Flight chunks | 25 | 25 | 49 |
+
+Phones start on Low. There is no user-agent sniffing — the check is
+`(pointer: coarse)` and `(hover: none)`, which is what actually matters and stays
+true for devices that do not exist yet.
+
+---
+
 ## How it is put together
 
 ```
@@ -219,6 +314,11 @@ src/
   maps.js           map definitions (pure data) + picker thumbnails
   world.js          builds and tears down a world from a map definition
   chunks.js         endless streamed world for Free Flight
+  buildings.js      instanced building batch — a whole city in 2 draw calls
+  flak.js           anti-aircraft batteries: tracking, lead, bursts
+  vehicles.js       instanced street traffic
+  quality.js        quality tiers and the adaptive frame-time governor
+  touch.js          touch controls: throttle quadrant, stick, triggers
   plane.js          aircraft model factory, parameterised per airframe
   cockpit.js        cockpit interior with live canvas instruments
   weapons.js        guns, tracers, bomb ballistics, cluster and incendiary logic
@@ -259,9 +359,10 @@ sim.economy.addCoins(9999)
 
 ## Known limits
 
-- Vegetation and pedestrians have no collision with the aircraft.
+- Vegetation, pedestrians and traffic have no collision with the aircraft.
 - Collapsed buildings stop being collidable; the ground check covers them.
 - Water is a flat plane, fatal to touch, with no waves.
+- Flak is the only thing that shoots back — there are still no AI aircraft.
 - The flight model is arcade, not a study sim. Shared constants are at the top of
   `src/main.js`; per-aircraft ones are in `src/catalog.js`.
 - **Every model is procedural three.js geometry.** See [`HANDOFF.md`](HANDOFF.md)
