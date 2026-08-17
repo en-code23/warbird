@@ -29,7 +29,7 @@ export const MAPS = [
     },
     ground: 0x5f7a45,
     town: {
-      grid: 9, block: 76, road: 18,
+      grid: 14, block: 76, road: 18,
       minH: 7, maxH: 29, downtown: 3.4,
       vacancy: 0.12, bigLotChance: 0.25,
       park: [2, 6],
@@ -65,7 +65,7 @@ export const MAPS = [
     },
     ground: 0x6d7c4c,
     town: {
-      grid: 8, block: 82, road: 20,
+      grid: 12, block: 82, road: 20,
       minH: 9, maxH: 34, downtown: 4.4,
       vacancy: 0.10, bigLotChance: 0.3,
       park: [1, 5],
@@ -103,7 +103,7 @@ export const MAPS = [
     },
     ground: 0xb59263,
     town: {
-      grid: 8, block: 60, road: 15,
+      grid: 12, block: 60, road: 15,
       minH: 5, maxH: 13, downtown: 1.5,
       vacancy: 0.2, bigLotChance: 0.4,
       park: null,
@@ -140,7 +140,7 @@ export const MAPS = [
     },
     ground: 0x6b7a5e,
     town: {
-      grid: 7, block: 68, road: 16,
+      grid: 10, block: 68, road: 16,
       minH: 8, maxH: 20, downtown: 2.0,
       vacancy: 0.14, bigLotChance: 0.35,
       park: [2, 4],
@@ -179,7 +179,7 @@ export const MAPS = [
     },
     ground: 0x5c6250,
     town: {
-      grid: 9, block: 88, road: 20,
+      grid: 14, block: 88, road: 20,
       minH: 6, maxH: 26, downtown: 2.2,
       vacancy: 0.08, bigLotChance: 0.5,
       park: [6, 1],
@@ -218,7 +218,7 @@ export const MAPS = [
     },
     ground: 0x1d2422,
     town: {
-      grid: 9, block: 78, road: 18,
+      grid: 14, block: 78, road: 18,
       minH: 8, maxH: 30, downtown: 3.6,
       vacancy: 0.1, bigLotChance: 0.25,
       park: [3, 6],

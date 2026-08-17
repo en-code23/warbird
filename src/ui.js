@@ -1,6 +1,8 @@
 import { MAPS, drawPreview } from './maps.js';
 import { MODES } from './modes.js';
 import { PLANES, GUNS, BOMBS, displaySpeed, bombCount } from './catalog.js';
+import { identity, validateName } from './identity.js';
+import { ShopPreview } from './shopPreview.js';
 
 /**
  * Overlay screens: menu, map picker, hangar/shop, multiplayer lobby, results.
@@ -47,6 +49,7 @@ export class UI {
     this.mode = MODES[0];
     this.duration = MODES[0].defaultDuration;
     this.shopKind = 'planes';
+    this.preview = new ShopPreview();
     this.visible = true;
     this.canResume = false;
 
@@ -60,7 +63,68 @@ export class UI {
 
     economy.onChange(() => this.refreshWallet());
     this.refreshWallet();
-    this.show('menu');
+
+    this.wireCallsign();
+    // First run gets the callsign prompt instead of the menu; every run after
+    // goes straight to the menu and is never asked again.
+    this.show(identity.chosen() ? 'menu' : 'callsign');
+  }
+
+  /* ================= callsign ================= */
+
+  wireCallsign() {
+    const form = $('callsign-form');
+    const input = $('callsign-input');
+    const error = $('callsign-error');
+    if (!form || !input) return;
+
+    const fail = (reason) => {
+      error.textContent = reason;
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+    };
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const check = validateName(input.value);
+      if (!check.ok) return fail(check.reason);
+
+      error.textContent = '';
+      input.removeAttribute('aria-invalid');
+      identity.set(check.name);
+      this.refreshCallsign();
+      this.show('menu');
+    });
+
+    // clear the error as soon as they start fixing it
+    input.addEventListener('input', () => {
+      error.textContent = '';
+      input.removeAttribute('aria-invalid');
+    });
+
+    this.refreshCallsign();
+  }
+
+  /** Paints the chosen callsign wherever it is shown. */
+  refreshCallsign() {
+    const name = identity.name;
+    if (!name) return;
+    for (const el of document.querySelectorAll('[data-callsign]')) {
+      el.textContent = name;
+    }
+  }
+
+  /**
+   * The server rejected the callsign — someone else registered it there first.
+   * Send them back to the prompt with the reason; this is the one path that
+   * can reopen it after first run.
+   */
+  callsignRejected(reason) {
+    const input = $('callsign-input');
+    const error = $('callsign-error');
+    if (input) input.value = identity.name ?? '';
+    if (error) error.textContent = reason;
+    this.show('callsign');
   }
 
   /* ================= graphics ================= */
@@ -125,6 +189,9 @@ export class UI {
     this.current = name;
     this.root.classList.remove('gone');
     this.visible = true;
+    // Leaving the hangar gives the preview's WebGL context back rather than
+    // holding a second one open behind the game for the rest of the session.
+    if (name !== 'hangar') this.preview.dispose();
     if (name === 'hangar') this.renderShop();
     if (name === 'menu') this.renderMenuSub();
   }
@@ -132,6 +199,7 @@ export class UI {
   hide() {
     this.root.classList.add('gone');
     this.visible = false;
+    this.preview.dispose();
   }
 
   renderMenuSub() {
@@ -281,6 +349,9 @@ export class UI {
   renderShop() {
     const list = $('shop-list');
     list.textContent = '';
+    // Every rebuild throws the old canvases away, so the previews attached to
+    // them have to go too or they keep drawing into detached nodes forever.
+    this.preview.dispose();
     const kind = this.shopKind;
     const table = { planes: PLANES, guns: GUNS, bombs: BOMBS }[kind];
     const slot = { planes: 'plane', guns: 'gun', bombs: 'bomb' }[kind];
@@ -303,6 +374,16 @@ export class UI {
       role.textContent = item.role ?? item.calibre ?? `${item.weight} kg`;
       head.append(title, role);
       card.appendChild(head);
+
+      // Aircraft get a live turntable of the model they will actually fly.
+      if (kind === 'planes') {
+        const view = document.createElement('canvas');
+        view.className = 'shop-view';
+        view.setAttribute('role', 'img');
+        view.setAttribute('aria-label', `${item.name}, rotating view`);
+        card.appendChild(view);
+        this.preview.add(view, item.id, item);
+      }
 
       const blurb = document.createElement('p');
       blurb.className = 'shop-blurb';
@@ -406,7 +487,13 @@ export class UI {
       params.get('server') ||
       localStorage.getItem('warbird.server') ||
       'ws://localhost:8080';
-    nameInput.value = localStorage.getItem('warbird.callsign') || '';
+    // The callsign is chosen once on first run and is not editable here.
+    if (nameInput) {
+      nameInput.value = identity.name ?? '';
+      nameInput.readOnly = true;
+      nameInput.tabIndex = -1;
+      nameInput.setAttribute('data-callsign', '');
+    }
 
     $('create-private').addEventListener('change', (e) => {
       $('create-pass-field').hidden = !e.target.checked;
@@ -414,11 +501,9 @@ export class UI {
 
     $('lobby-connect').addEventListener('click', () => {
       const url = serverInput.value.trim();
-      const name = nameInput.value.trim() || 'Pilot';
       localStorage.setItem('warbird.server', url);
-      localStorage.setItem('warbird.callsign', name);
       this.setLobbyStatus('Connecting…');
-      this.net.connect(url, name);
+      this.net.connect(url, identity.name ?? 'Pilot');
     });
 
     $('create-go').addEventListener('click', () => {
@@ -446,6 +531,16 @@ export class UI {
       this.setLobbyStatus(why || 'Disconnected');
       $('create-go').disabled = true;
       this.renderLobbies([]);
+    });
+    // The server owns the spelling and issues the secret on a first claim.
+    this.net.on('claimed', ({ name, secret, returning }) => {
+      identity.confirm(name, secret);
+      this.refreshCallsign();
+      this.setLobbyStatus(returning ? `Welcome back, ${name}` : `Registered as ${name}`);
+    });
+    this.net.on('claimFailed', (reason) => {
+      this.setLobbyStatus(reason);
+      this.callsignRejected(`${reason} — pick another.`);
     });
     this.net.on('lobbies', (list) => this.renderLobbies(list));
     this.net.on('joined', (room) => this.renderRoom(room));

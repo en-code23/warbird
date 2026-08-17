@@ -13,8 +13,11 @@
 
 import { WebSocketServer } from 'ws';
 import { randomUUID } from 'node:crypto';
+import { openRegistry } from './registry.js';
 
 const PORT = Number(process.env.PORT) || 8080;
+/** Persistent callsign registry — see registry.js for what it does and does not protect. */
+const registry = openRegistry(process.env.WARBIRD_DB);
 /** Broadcast rate for aggregated player state. */
 const TICK_MS = 66;
 /** Drop a connection that has not said anything in this long. */
@@ -36,6 +39,7 @@ const clients = new Set();
 
 const wss = new WebSocketServer({ port: PORT });
 console.log(`[warbird] lobby server listening on :${PORT}`);
+console.log(`[warbird] callsign registry: ${registry.kind}, ${registry.count()} registered`);
 
 /* ------------------------------------------------------------------ */
 
@@ -117,6 +121,7 @@ wss.on('connection', (ws) => {
     id: randomUUID().slice(0, 8),
     ws,
     name: 'Pilot',
+    verified: false,
     room: null,
     state: null,
     score: 0,
@@ -149,8 +154,35 @@ wss.on('connection', (ws) => {
     }
 
     switch (msg.t) {
+      /**
+       * Claim a callsign. The client sends the secret it stored the first time;
+       * the server issues one when the name is free. A client that fails here
+       * is not admitted to any lobby under that name.
+       */
+      case 'claim': {
+        const result = registry.claim(msg.name, msg.secret);
+        if (!result.ok) {
+          send(ws, { t: 'claimFailed', reason: result.reason });
+          return;
+        }
+        client.name = result.name;
+        client.verified = true;
+        send(ws, {
+          t: 'claimed',
+          name: result.name,
+          secret: result.secret,
+          returning: result.returning
+        });
+        break;
+      }
+
       case 'hello':
-        client.name = String(msg.name ?? 'Pilot').slice(0, 14) || 'Pilot';
+        // Legacy path for a client with no stored identity yet. Unverified
+        // names are still usable for a casual game, but they are never written
+        // to the registry, so they cannot squat on someone else's callsign.
+        if (!client.verified) {
+          client.name = String(msg.name ?? 'Pilot').slice(0, 14) || 'Pilot';
+        }
         break;
 
       case 'list':

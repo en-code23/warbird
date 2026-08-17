@@ -219,6 +219,7 @@ const sight = new THREE.Mesh(
 );
 sight.rotation.x = -Math.PI / 2;
 sight.renderOrder = 5;
+sight.name = 'bombsight';
 scene.add(sight);
 
 /* ==========================================================================
@@ -241,6 +242,10 @@ const state = {
   outOfArea: 0,
   touchdown: null,
   lastHitBy: null,
+  /** seconds of post-spawn immunity remaining; see resetPlane */
+  spawnGrace: 0,
+  /** 0..1 progress of a runway resupply; see updateResupply */
+  resupply: 0,
   pitchIn: 0,
   rollIn: 0
 };
@@ -259,6 +264,8 @@ const session = {
   landings: 0,
   flak: 0,
   flakWarned: false,
+  /** final scoreboard from the server, set when a match ends */
+  standings: null,
   running: false
 };
 
@@ -360,6 +367,7 @@ async function launch({ mode, map, duration, room }) {
   session.landings = 0;
   session.flak = 0;
   session.flakWarned = false;
+  session.standings = null;
   session.running = true;
   session.room = room ?? null;
 
@@ -414,10 +422,50 @@ async function launch({ mode, map, duration, room }) {
   );
 }
 
+/** Lateral lane spacing and row spacing for multiplayer spawn slots. */
+const SPAWN_LANE = 14;
+const SPAWN_ROW = 26;
+/** Seconds of immunity after a spawn, so a respawn is never an instant death. */
+const SPAWN_GRACE = 2.5;
+
+/**
+ * Which parking slot on the strip this player gets.
+ *
+ * Everyone in a dogfight shares one runway, and `runway.start` is a single
+ * point. Spawning every aircraft on it put them all inside the 7-unit ram
+ * radius, so a match began with the whole lobby killing each other before
+ * anyone had touched a control — and every respawn did it again.
+ *
+ * Slots come from the player's index in the room list sorted by id, which every
+ * client computes identically, so no two aircraft are ever assigned the same
+ * spot without the server having to arbitrate it.
+ */
+function spawnSlot() {
+  const players = net.room?.players;
+  if (!players || players.length < 2 || !net.id) return 0;
+  const ids = players.map((p) => p.id).sort();
+  const i = ids.indexOf(net.id);
+  return i < 0 ? 0 : i;
+}
+
 function resetPlane() {
   const g = plane.group;
   g.position.copy(runway.start);
   g.position.y = runway.deck + plane.gearHeight;
+
+  // Three abreast, then further back down the strip — everyone still points
+  // down the runway with clear air ahead of them. Slot 0 takes the centreline
+  // with no offset so singleplayer starts exactly where it always did; the
+  // lane order must therefore be [centre, left, right] rather than starting at
+  // one edge, or slots 0 and 1 land on the same spot.
+  const slot = spawnSlot();
+  if (slot > 0 && runway.side && runway.forward) {
+    const lane = [0, -1, 1][slot % 3];
+    const row = Math.floor(slot / 3);
+    g.position.addScaledVector(runway.side, lane * SPAWN_LANE);
+    g.position.addScaledVector(runway.forward, -row * SPAWN_ROW);
+  }
+
   g.quaternion.setFromAxisAngle(UP, Math.atan2(-runway.forward.x, -runway.forward.z));
   g.visible = true;
 
@@ -433,6 +481,10 @@ function resetPlane() {
   state.outOfArea = 0;
   state.touchdown = null;
   state.lastHitBy = null;
+  // Belt and braces behind the slots: if the room list shifts as someone leaves
+  // two players can briefly resolve to the same slot, and a respawn should
+  // never be an instant death sentence.
+  state.spawnGrace = SPAWN_GRACE;
 
   weapons.rearm();
   weapons.reset();
@@ -450,7 +502,24 @@ const HELD = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'
 ]);
 
+/**
+ * True when the keystroke belongs to a text field rather than to the aircraft.
+ *
+ * The flight controls call `preventDefault()` on the keys they hold down, which
+ * includes W, A, S, D, Q, E, B and Space. Without this guard that ran for every
+ * keydown on the page, so those letters could not be typed into any input in
+ * the game — the callsign and lobby-password boxes silently swallowed most of
+ * the alphabet.
+ */
+function isTyping(e) {
+  const t = e.target;
+  if (!t || t === document.body) return false;
+  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+    || t.tagName === 'SELECT' || t.isContentEditable === true;
+}
+
 addEventListener('keydown', (e) => {
+  if (isTyping(e)) return;
   if (HELD.has(e.code)) e.preventDefault();
   if (e.repeat) return;
   keys[e.code] = true;
@@ -466,6 +535,8 @@ addEventListener('keydown', (e) => {
 });
 
 addEventListener('keyup', (e) => {
+  // Not gated on isTyping: a key pressed before focus moved into a field must
+  // still be released, or the aircraft holds that input forever.
   keys[e.code] = false;
 });
 
@@ -762,6 +833,10 @@ function updateCollapses(dt) {
 
 function damage(amount, fromId, reason) {
   if (!state.alive) return;
+  // A player who rams you during your spawn window still reports the hit from
+  // their side, so the window has to hold against incoming damage as well as
+  // against our own collision check — otherwise it protects nobody.
+  if (state.spawnGrace > 0) return;
   state.hp -= amount;
   if (fromId) state.lastHitBy = fromId;
   state.shake = Math.max(state.shake, Math.min(0.7, amount / 60));
@@ -839,6 +914,45 @@ function gradeTouchdown(sinkRate, alignment, onStrip) {
   if (sinkRate < 2.8) return { grade: 'GOOD', bonus: 3, note: '' };
   if (sinkRate < 5.5) return { grade: 'FIRM', bonus: 2, note: '' };
   return { grade: 'HARD', bonus: 1, note: 'easy on the gear' };
+}
+
+/** Seconds on the strip to take on a full load. */
+const RESUPPLY_TIME = 3;
+/** Fast enough to still be rolling; slow enough that you meant to stop. */
+const RESUPPLY_SPEED = 26;
+
+/**
+ * Rearming without respawning.
+ *
+ * Coming home used to mean braking to a dead stop before anything happened, so
+ * flying into the ground and respawning was simply the quicker way to reload —
+ * which is a bad thing for a game to teach. Rolling onto the strip under taxi
+ * speed now starts a visible resupply that also patches the airframe, and it
+ * finishes faster than a death and respawn does.
+ */
+function updateResupply(dt, onStrip) {
+  const needs = weapons.bombs < weapons.maxBombs
+    || weapons.ammo < weapons.maxAmmo
+    || state.hp < state.maxHp;
+
+  if (!onStrip || state.speed > RESUPPLY_SPEED || !needs) {
+    if (state.resupply !== 0) {
+      state.resupply = 0;
+      hud.setResupply(0);
+    }
+    return;
+  }
+
+  state.resupply = Math.min(1, state.resupply + dt / RESUPPLY_TIME);
+  hud.setResupply(state.resupply);
+
+  if (state.resupply >= 1) {
+    state.resupply = 0;
+    hud.setResupply(0);
+    weapons.rearm();
+    state.hp = Math.min(state.maxHp, state.hp + state.maxHp * 0.5);
+    hud.banner('REARMED &amp; PATCHED<small>rolling resupply complete</small>', 'good', 1.8);
+  }
 }
 
 function completeLanding() {
@@ -979,20 +1093,16 @@ function updateFlight(dt) {
     const brake = state.braking ? 30 : state.throttle < 0.1 ? 12 : 3;
     state.speed = Math.max(0, state.speed - brake * dt);
 
-    if (state.speed < 4) {
-      if (state.touchdown && !state.touchdown.scored) {
-        completeLanding();
-      } else if (
-        !state.touchdown && runway.contains(g.position) &&
-        (weapons.bombs < weapons.maxBombs || weapons.ammo < weapons.maxAmmo)
-      ) {
-        weapons.rearm();
-        hud.banner('REARMED', 'good', 1.4);
-      }
+    if (state.speed < 4 && state.touchdown && !state.touchdown.scored) {
+      completeLanding();
     }
+
+    updateResupply(dt, runway.contains(g.position));
   } else if (state.grounded && g.position.y > deck + gear + 0.05) {
     state.grounded = false;
     state.touchdown = null;
+    state.resupply = 0;
+    hud.setResupply(0);
   }
 
   // --- structures and terrain ---
@@ -1012,12 +1122,15 @@ function updateFlight(dt) {
   }
 
   // --- ramming another aircraft takes you both out ---
-  for (const r of remotes.values()) {
-    if (!r.alive) continue;
-    if (g.position.distanceTo(r.group.position) < 7) {
-      net.reportHit(r.id, 9999);
-      crash('MID-AIR COLLISION');
-      return;
+  if (state.spawnGrace > 0) state.spawnGrace -= dt;
+  else {
+    for (const r of remotes.values()) {
+      if (!r.alive) continue;
+      if (g.position.distanceTo(r.group.position) < 7) {
+        net.reportHit(r.id, 9999);
+        crash('MID-AIR COLLISION');
+        return;
+      }
     }
   }
 
@@ -1068,18 +1181,115 @@ function updatePAPI(info) {
   }
 }
 
+/* ---------- bomb sight ---------- */
+
+const _predPos = new THREE.Vector3();
+const _predVel = new THREE.Vector3();
+
+/**
+ * Where the next bomb will actually land.
+ *
+ * This integrates the same equations `Weapons.updateBombs` does, at the same
+ * release conditions, using the equipped bomb's own drag coefficient. The old
+ * sight solved a vacuum parabola and ignored drag entirely, so it always
+ * promised more range than the bomb had and every stick fell long — which is
+ * most of why bombing felt like guesswork.
+ *
+ * It also stops at rooftops rather than at y=0, because a bomb aimed at a tower
+ * block hits the roof, not the street behind it.
+ *
+ * @returns {{point: THREE.Vector3, time: number, onRoof: boolean} | null}
+ */
+function predictImpact() {
+  const spec = economy.loadout.bomb;
+  if (!spec) return null;
+
+  _predPos.copy(plane.group.position);
+  _predVel.copy(state.velocity);
+  _predVel.y -= 2; // pushed clear of the rack, exactly as dropBomb does
+
+  const ceiling = maxRoof();
+  const step = 1 / 30;
+  for (let t = 0; t < 22; t += step) {
+    _predVel.y -= BOMB_GRAVITY * step;
+    _predVel.multiplyScalar(1 - spec.dragCoef * step);
+    _predPos.addScaledVector(_predVel, step);
+
+    if (_predPos.y <= 0) {
+      _predPos.y = 0;
+      return { point: _predPos, time: t, onRoof: false };
+    }
+    if (_predPos.y <= ceiling) {
+      const roof = roofUnder(_predPos);
+      if (roof !== null && _predPos.y <= roof) {
+        _predPos.y = roof;
+        return { point: _predPos, time: t, onRoof: true };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Height of the building directly under `p`, or null over open ground.
+ *
+ * Only ever called once the falling bomb is below the tallest thing standing,
+ * because a linear scan of a whole city per integration step is not affordable
+ * — that gate turns hundreds of steps' worth of scanning into a handful.
+ */
+function roofUnder(p) {
+  const list = world?.buildings;
+  if (!list) return null;
+  for (const b of list) {
+    if (!b.alive) continue;
+    const c = b.center;
+    if (Math.abs(p.x - c.x) <= b.size.x * 0.5 && Math.abs(p.z - c.z) <= b.size.z * 0.5) {
+      return b.max.y;
+    }
+  }
+  return null;
+}
+
+/** Tallest roof in the current world, refreshed occasionally rather than per step. */
+let tallestRoof = 0;
+let roofStamp = 0;
+
+function maxRoof() {
+  const now = performance.now();
+  if (now - roofStamp < 500) return tallestRoof;
+  roofStamp = now;
+  tallestRoof = 0;
+  for (const b of world?.buildings ?? []) {
+    if (b.alive && b.max.y > tallestRoof) tallestRoof = b.max.y;
+  }
+  return tallestRoof;
+}
+
 function updateSight() {
   const p = plane.group.position;
-  if (!state.alive || state.grounded || p.y < 6 || state.scoped) {
+  // Kept visible while scoped: the scope is what you aim through, so hiding
+  // the sight there removed it exactly when it was wanted.
+  if (!state.alive || state.grounded || p.y < 6 || weapons.bombs <= 0) {
     sight.visible = false;
     return;
   }
-  const vy = state.velocity.y;
-  const t = (vy + Math.sqrt(vy * vy + 2 * BOMB_GRAVITY * p.y)) / BOMB_GRAVITY;
+
+  const hit = predictImpact();
+  if (!hit) {
+    sight.visible = false;
+    return;
+  }
+
   sight.visible = true;
-  sight.position.set(p.x + state.velocity.x * t, 0.9, p.z + state.velocity.z * t);
+  // lifted clear of whatever it is sitting on so it is never z-fighting
+  sight.position.set(hit.point.x, hit.point.y + 0.9, hit.point.z);
   sight.scale.setScalar(clamp(p.y / 90, 0.6, 4));
-  sight.material.opacity = 0.35 + 0.45 * Math.abs(Math.sin(performance.now() * 0.004));
+
+  // Solid on a building, pulsing over open ground: the steady ring is the
+  // "release now" cue, so you can fly the sight onto the target and drop.
+  const pulse = 0.35 + 0.45 * Math.abs(Math.sin(performance.now() * 0.004));
+  sight.material.opacity = hit.onRoof ? 0.9 : pulse;
+  sight.material.color.setHex(hit.onRoof ? 0xe8542e : 0xcde06a);
 }
 
 /* ==========================================================================
@@ -1204,6 +1414,28 @@ function applyShake(dt) {
    Session end / menu
    ========================================================================== */
 
+const ordinal = (n) => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+};
+
+/**
+ * Where this player finished, from the standings the server sent with `over`.
+ * @returns {{rank: number, field: number} | null} null outside multiplayer
+ */
+function matchPlacing() {
+  const board = session.standings;
+  if (!board?.length || !net.id) return null;
+  const i = board.findIndex((p) => p.id === net.id);
+  if (i < 0) return null;
+  // The server sorts by score, but a tie should not silently hand the win to
+  // whoever the sort happened to put first.
+  const mine = board[i].score;
+  const better = board.filter((p) => p.score > mine).length;
+  return { rank: better + 1, field: board.length };
+}
+
 function endSortie(reason) {
   if (!session.running) return;
   session.running = false;
@@ -1216,7 +1448,19 @@ function endSortie(reason) {
   // Half the score was too thin against the price list; see catalog.js for the
   // retuned curve. Landings pay a flat completion bonus on top, so flying the
   // aircraft home is worth more than one last pass over the city.
-  const coins = Math.round(session.score * 0.6) + (session.landings > 0 ? 120 : 0);
+  // Winning a dogfight pays. The bonus scales with the size of the lobby so
+  // taking a 2-player match is not worth the same as topping a full one, and a
+  // second place still gets something for turning up at the sharp end.
+  const placing = matchPlacing();
+  let bonus = 0;
+  if (placing) {
+    if (placing.rank === 1) bonus = 250 + placing.field * 75;
+    else if (placing.rank === 2 && placing.field >= 4) bonus = 90;
+  }
+
+  const coins = Math.round(session.score * 0.6)
+    + (session.landings > 0 ? 120 : 0)
+    + bonus;
   economy.addCoins(coins);
   economy.record('sorties');
   economy.record('buildings', session.buildings);
@@ -1235,7 +1479,11 @@ function endSortie(reason) {
       ...(session.mode.multiplayer
         ? [['Kills', String(session.kills)], ['Deaths', String(session.deaths)]]
         : []),
-      ['Landings', String(session.landings)]
+      ['Landings', String(session.landings)],
+      ...(placing
+        ? [['Placed', `${ordinal(placing.rank)} of ${placing.field}`]]
+        : []),
+      ...(bonus ? [[placing.rank === 1 ? 'Victory bonus' : 'Runner-up bonus', `+${bonus}`]] : [])
     ],
     coins
   });
@@ -1331,6 +1579,11 @@ function frame(now) {
       matrix: plane.group.matrixWorld,
       muzzles: plane.muzzles,
       forward: fwd,
+      // the airframe's own axes, so gun harmonisation and dispersion are
+      // measured from the aircraft rather than from the world
+      right,
+      up,
+      origin: plane.group.position,
       world,
       pedestrians,
       targets: gunTargets(),
@@ -1548,7 +1801,10 @@ net.handle = ((original) => function patched(msg) {
     return;
   }
   original.call(net, msg);
-  if (msg.t === 'over') endSortie('Match over');
+  if (msg.t === 'over') {
+    session.standings = msg.standings ?? [];
+    endSortie('Match over');
+  }
 })(net.handle);
 
 /* ---------- debug handle ---------- */
@@ -1564,6 +1820,7 @@ window.sim = {
   get pedestrians() { return pedestrians; },
   get remotes() { return remotes; },
   crash, respawn, detonate, approachInfo, launch, endSortie, buildAircraft,
+  predictImpact, matchPlacing,
   setRunning(v) {
     running = v;
     last = performance.now();

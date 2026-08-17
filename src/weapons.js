@@ -23,6 +23,8 @@ const _d = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _scorch = new THREE.Color();
 const _q = new THREE.Vector3();
+/** Harmonisation point every gun is aimed at this frame. */
+const _conv = new THREE.Vector3();
 const _m = new THREE.Vector3();
 
 /* ==========================================================================
@@ -219,15 +221,26 @@ export class Weapons {
     shots = Math.min(shots, this.ammo);
     this.ammo -= shots;
 
+    // Harmonisation point: every gun is aimed at one spot on the boresight
+    // rather than straight ahead, so wing guns cross there the way they were
+    // actually set up on the ground. Firing everything parallel to the nose
+    // meant a four-gun aircraft sprayed a fixed-width box at every range and
+    // the outer guns could never hit what the sight was on.
+    const range = gun.convergence ?? 260;
+    _conv.copy(ctx.forward).multiplyScalar(range).add(ctx.origin ?? _o);
+
     for (let i = 0; i < shots; i++) {
       const muzzle = ctx.muzzles[i % ctx.muzzles.length];
       _o.copy(muzzle).applyMatrix4(ctx.matrix);
 
-      // aim along the nose with a random spread cone
-      _d.copy(ctx.forward);
-      _d.x += (Math.random() - 0.5) * gun.spread * 2;
-      _d.y += (Math.random() - 0.5) * gun.spread * 2;
-      _d.z += (Math.random() - 0.5) * gun.spread * 2;
+      _d.subVectors(_conv, _o).normalize();
+
+      // Dispersion is built in the aircraft's own right/up axes, so the cone
+      // stays put relative to the airframe instead of shifting as it rolls.
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * gun.spread;
+      _d.addScaledVector(ctx.right, Math.cos(a) * r);
+      _d.addScaledVector(ctx.up, Math.sin(a) * r);
       _d.normalize();
 
       this._resolveShot(_o, _d, ctx);
@@ -326,13 +339,19 @@ export class Weapons {
 
     if (!hitKind) return;
 
+    // Rounds shed energy downrange, so a hit at 700 m does not do what a hit at
+    // 150 m does. Full damage out to the harmonisation range, then falling off
+    // to a floor — which is what makes closing to convergence worth the risk
+    // instead of spraying from a safe distance.
+    const damage = gun.damage * this._falloff(bestT, gun);
+
     switch (hitKind) {
       case 'plane':
-        ctx.onHit?.({ kind: 'plane', target: hitRef, damage: gun.damage, point: _p });
+        ctx.onHit?.({ kind: 'plane', target: hitRef, damage, point: _p });
         this.effects.spark(_p, _q.set(0, 6, 0), 0.4, 0.28);
         break;
       case 'building':
-        this._damageBuilding(hitRef, gun.damage, _p, ctx);
+        this._damageBuilding(hitRef, damage, _p, ctx);
         break;
       case 'pedestrian':
         ctx.pedestrians.kill(hitRef, _p);
@@ -344,7 +363,7 @@ export class Weapons {
         break;
       case 'flak':
         this.effects.spark(_p, _q.set(0, 7, 0), 0.5, 0.3);
-        if (ctx.world.flak.hit(hitRef, gun.damage)) {
+        if (ctx.world.flak.hit(hitRef, damage)) {
           ctx.onHit?.({ kind: 'flak', point: _p });
         }
         break;
@@ -352,6 +371,20 @@ export class Weapons {
         this.effects.puff(_p, { r0: 0.4, r1: 2.6, life: 0.6, opacity: 0.3 });
         break;
     }
+  }
+
+  /**
+   * Damage multiplier at a given range: full inside the harmonisation point,
+   * tapering to `falloffFloor` at twice that range and holding there.
+   * @param {number} range metres to the hit
+   * @param {object} gun a GUNS[] entry
+   */
+  _falloff(range, gun) {
+    const conv = gun.convergence ?? 260;
+    if (range <= conv) return 1;
+    const k = Math.min(1, (range - conv) / conv);
+    const floor = gun.falloffFloor ?? 0.45;
+    return 1 - (1 - floor) * k;
   }
 
   _damageBuilding(b, damage, point, ctx) {

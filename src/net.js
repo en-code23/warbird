@@ -9,6 +9,8 @@
  * The protocol is JSON, one message per frame-ish. See server/README.md.
  */
 
+import { identity } from './identity.js';
+
 /** How often we push our own state to the server (seconds). */
 const STATE_HZ = 15;
 
@@ -55,7 +57,11 @@ export class Net {
     this.ws = ws;
 
     ws.addEventListener('open', () => {
-      this.send({ t: 'hello', name: this.name });
+      // Claim the callsign before anything else, so the name every later
+      // message is attributed to has been checked against the registry.
+      const me = identity.get();
+      if (me) this.send({ t: 'claim', name: me.name, secret: me.secret });
+      else this.send({ t: 'hello', name: this.name });
       this.emit('connected');
       this.send({ t: 'list' });
     });
@@ -156,6 +162,15 @@ export class Net {
     switch (msg.t) {
       case 'welcome':
         this.id = msg.id;
+        break;
+
+      case 'claimed':
+        this.name = msg.name;
+        this.emit('claimed', msg);
+        break;
+
+      case 'claimFailed':
+        this.emit('claimFailed', msg.reason);
         break;
 
       case 'lobbies':

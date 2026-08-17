@@ -37,6 +37,8 @@ export const TIERS = {
     drawDistance: 2600,
     fogScale: 1.5,
     vegetationScale: 0.35,
+    cityScale: 0.62,
+    outskirts: 0.35,
     toneMapping: false
   },
   medium: {
@@ -56,6 +58,8 @@ export const TIERS = {
     drawDistance: 5200,
     fogScale: 1.15,
     vegetationScale: 0.7,
+    cityScale: 0.82,
+    outskirts: 0.7,
     toneMapping: true
   },
   high: {
@@ -75,6 +79,8 @@ export const TIERS = {
     drawDistance: 9000,
     fogScale: 1,
     vegetationScale: 1,
+    cityScale: 1,
+    outskirts: 1,
     toneMapping: true
   }
 };

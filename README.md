@@ -35,6 +35,19 @@ npm run server       # ws://localhost:8080
 
 ---
 
+## Your callsign
+
+You pick one on first run and keep it — the game never asks again. It is stored
+on your device with a secret this browser generates; the first time you join a
+lobby server, that server binds the name to a hash of the secret, so nobody else
+can turn up under it there.
+
+Be clear about what that is: it stops casual impersonation on a given server. It
+is **not** an account system. There is no password, no recovery, and anyone with
+access to your browser profile can be you. See `server/registry.js`.
+
+---
+
 ## Controls
 
 ### Touch
@@ -81,6 +94,27 @@ iPhone Safari, which exposes no Fullscreen API to hide behind it.
 Music, sound and fullscreen have toggles at the bottom of the main menu. Each is
 a lamp reflecting real state, so a fullscreen exit the browser performs on its
 own still turns the light off.
+
+### Rearming without dying
+
+Roll back onto your own strip under taxi speed and a resupply starts — three
+seconds for a full load of bombs and ammunition plus half your airframe back.
+You do not need to come to a dead stop, and you certainly do not need to fly
+into the ground and respawn, which used to be the quicker way to reload.
+
+### Bombing
+
+The sight ring is the predicted impact point, integrated with the equipped
+bomb's actual drag rather than a vacuum parabola, so it lands within a few
+metres of where the ring sits. It turns solid red when the bomb will hit a
+building rather than the street — that steady ring is the release cue.
+
+### Gunnery
+
+Guns are harmonised: every mount is aimed at one point on the boresight rather
+than straight ahead, so the rounds converge there and open out again beyond it.
+Each weapon lists its convergence range. Damage falls off past it, so closing to
+harmonisation range is worth the risk.
 
 **Bank to turn.** The nose follows the roll — the rudder is only for trimming and
 for steering on the ground. Below your aircraft's stall speed the wing stops
@@ -364,6 +398,8 @@ tools/
   engine-measure.js offline A/B of the engine synth (see Audio below)
 src/
   main.js           flight model, combat, scoring, camera, game loop
+  identity.js       the callsign you pick once, and its device secret
+  shopPreview.js    rotating 3D aircraft previews in the hangar
   catalog.js        data: aircraft, guns, bombs — stats, prices, descriptions
   economy.js        coins, ownership, loadout, localStorage save
   modes.js          game mode rules
@@ -387,6 +423,7 @@ src/
   net.js            multiplayer client
 server/
   index.js          Node WebSocket lobby + relay server
+  registry.js       persistent callsign registry (SQLite, JSON fallback)
 ```
 
 Design rules worth keeping if you extend it:

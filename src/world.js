@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BuildingBatch } from './buildings.js';
 import { Vehicles } from './vehicles.js';
 import { Flak, flakSites } from './flak.js';
@@ -226,6 +227,153 @@ function vegetation(kind) {
   ];
 }
 
+/**
+ * Rooftop clutter — plant housings, stair heads, water tanks.
+ *
+ * You spend the whole game looking down at roofs, so this is the detail with
+ * the best return per triangle in the entire world. One InstancedMesh, so the
+ * whole city's worth of it costs a single draw call.
+ */
+function rooftopClutter(group, roofs, colour) {
+  if (!roofs.length) return null;
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.9 });
+  const mesh = new THREE.InstancedMesh(geo, mat, roofs.length);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+
+  roofs.forEach((r, i) => {
+    q.setFromAxisAngle(UP, r.rot);
+    pos.set(r.x, r.y + r.h / 2, r.z);
+    scl.set(r.w, r.h, r.d);
+    mesh.setMatrixAt(i, m.compose(pos, q, scl));
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  group.add(mesh);
+  return mesh;
+}
+
+/**
+ * The country beyond the city: a patchwork of fields divided by hedgerows,
+ * blocks of woodland, and a few outlying hamlets.
+ *
+ * Everything here is instanced or merged, and the hamlet buildings go into the
+ * city's own BuildingBatch, so the entire countryside adds three draw calls and
+ * no new bombable-object bookkeeping.
+ */
+function outskirts(group, opts) {
+  const {
+    townHalf, reach, density, lawnColor, batch, buildings, treeKind, clearOf
+  } = opts;
+  if (density <= 0) return;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const outside = (x, z) => Math.max(Math.abs(x), Math.abs(z)) > townHalf * 1.12;
+
+  /* ---- field patchwork ---------------------------------------------- */
+  // One merged geometry for every field, tinted per patch through vertex
+  // colours, which is why a hundred fields still cost one draw call.
+  const base = new THREE.Color(lawnColor);
+  const fieldGeos = [];
+  const cell = 150;
+  const steps = Math.ceil(reach / cell);
+
+  for (let i = -steps; i <= steps; i++) {
+    for (let j = -steps; j <= steps; j++) {
+      const x = i * cell + rand(-18, 18);
+      const z = j * cell + rand(-18, 18);
+      if (!outside(x, z)) continue;
+      if (Math.hypot(x, z) > reach) continue;
+      if (clearOf && clearOf(x, z, cell)) continue;
+      // Leave real gaps of open ground — a solid wall-to-wall quilt looks more
+      // artificial than farmland with rough between the fields.
+      if (Math.random() > density * 0.72) continue;
+
+      const w = cell * rand(0.55, 1.0);
+      const d = cell * rand(0.55, 1.0);
+      const g = new THREE.PlaneGeometry(w, d);
+      g.rotateX(-Math.PI / 2);
+      // a few degrees off square, so the patchwork does not read as a checkerboard
+      g.rotateY(rand(-0.35, 0.35));
+      g.translate(x, 0.06, z);
+
+      // Ploughed earth through to standing crop. Kept deliberately narrow:
+      // wide HSL jitter turned neighbouring fields into a neon quilt with
+      // near-black holes in it, which reads as broken rather than as farmland.
+      const tint = base.clone().offsetHSL(
+        rand(-0.025, 0.025), rand(-0.10, 0.04), rand(-0.06, 0.07)
+      );
+      const colours = new Float32Array(g.attributes.position.count * 3);
+      for (let k = 0; k < g.attributes.position.count; k++) {
+        colours[k * 3] = tint.r;
+        colours[k * 3 + 1] = tint.g;
+        colours[k * 3 + 2] = tint.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+      fieldGeos.push(g);
+    }
+  }
+
+  if (fieldGeos.length) {
+    const merged = mergeGeometries(fieldGeos);
+    for (const g of fieldGeos) g.dispose();
+    if (merged) {
+      const fields = new THREE.Mesh(
+        merged,
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })
+      );
+      fields.receiveShadow = true;
+      fields.renderOrder = -1;
+      group.add(fields);
+    }
+  }
+
+  /* ---- woodland ------------------------------------------------------ */
+  const [ga, ma, gb, mb] = vegetation(treeKind);
+  const woodCount = Math.round(220 * density);
+  const clumps = Math.max(3, Math.round(10 * density));
+  const centres = [];
+  for (let i = 0; i < clumps; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = rand(townHalf * 1.3, reach * 0.9);
+    centres.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  for (const inst of scatterInstances(woodCount, ga, ma, gb, mb, (p) => {
+    const [cx, cz] = centres[(Math.random() * centres.length) | 0];
+    p.set(cx + rand(-90, 90), 0, cz + rand(-90, 90));
+  })) {
+    group.add(inst);
+  }
+
+  /* ---- hamlets ------------------------------------------------------- */
+  const hamlets = Math.max(2, Math.round(5 * density));
+  for (let h = 0; h < hamlets; h++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = rand(townHalf * 1.35, reach * 0.85);
+    const hx = Math.cos(a) * r;
+    const hz = Math.sin(a) * r;
+    if (clearOf && clearOf(hx, hz, 120)) continue;
+
+    const homes = 4 + Math.floor(Math.random() * 6);
+    for (let i = 0; i < homes; i++) {
+      const x = hx + rand(-55, 55);
+      const z = hz + rand(-55, 55);
+      const w = rand(9, 15);
+      const d = rand(9, 15);
+      const bld = makeBuilding(batch, x, z, w, d, rand(5, 9), {
+        color: 0xa89880,
+        roofThickness: 1.4
+      });
+      if (bld) buildings.push(bld);
+    }
+  }
+}
+
 /* ====================== the builder ====================== */
 
 export function createWorld(map, quality) {
@@ -234,7 +382,13 @@ export function createWorld(map, quality) {
   const buildings = [];
   const hazards = [];
 
-  const t = map.town;
+  // The city is laid out at the map's full size on a desktop and shrunk on
+  // weaker hardware. Scaling the grid rather than the block size keeps street
+  // widths and building proportions identical — a phone gets a smaller city,
+  // not a squashed one.
+  const t = { ...map.town };
+  t.grid = Math.max(4, Math.round(t.grid * (quality.cityScale ?? 1)));
+
   const CELL = t.block + t.road;
   const TOWN_HALF = (t.grid * CELL) / 2;
 
@@ -242,9 +396,10 @@ export function createWorld(map, quality) {
   const asphalt = new THREE.MeshStandardMaterial({ color: t.roadColor, roughness: 0.95 });
   const tile = t.style === 'office' ? 16 : 12;
 
-  // Up to four lots per block, plus slack for piers and one-off structures.
+  // Up to four lots per block, plus slack for piers, one-off structures and
+  // the outlying hamlets, which share this batch rather than opening another.
   const batch = new BuildingBatch(group, {
-    capacity: t.grid * t.grid * 4 + 24,
+    capacity: t.grid * t.grid * 4 + 120,
     map: facade,
     tile,
     roofColor: t.roofColor,
@@ -298,6 +453,7 @@ export function createWorld(map, quality) {
   }
 
   /* ---------- blocks ---------- */
+  const roofs = [];
   for (let i = 0; i < t.grid; i++) {
     for (let j = 0; j < t.grid; j++) {
       const bx = -TOWN_HALF + t.road / 2 + i * CELL + t.block / 2;
@@ -347,6 +503,21 @@ export function createWorld(map, quality) {
           if (!bld) continue;
           buildings.push(bld);
 
+          // plant housing on anything with a roof worth cluttering
+          if (w > 14 && Math.random() < 0.7) {
+            const cw = w * (0.16 + Math.random() * 0.22);
+            const cd = d * (0.16 + Math.random() * 0.22);
+            roofs.push({
+              x: x + (Math.random() - 0.5) * (w - cw) * 0.6,
+              z: z + (Math.random() - 0.5) * (d - cd) * 0.6,
+              y: h,
+              w: cw,
+              d: cd,
+              h: 1.2 + Math.random() * 2.6,
+              rot: Math.random() * Math.PI
+            });
+          }
+
           if (h > 45) {
             const mast = new THREE.Mesh(
               new THREE.CylinderGeometry(0.25, 0.35, 12, 6),
@@ -360,6 +531,8 @@ export function createWorld(map, quality) {
       }
     }
   }
+
+  rooftopClutter(group, roofs, t.roofColor);
 
   /* ---------- airfield ---------- */
   const r = map.runway;
@@ -582,6 +755,22 @@ export function createWorld(map, quality) {
       group.add(inst);
     }
   }
+
+  /* ---------- countryside ---------- */
+  // Beyond the last street: fields, woods and hamlets, so the city has an
+  // outside rather than ending at an abrupt edge of empty green.
+  outskirts(group, {
+    townHalf: TOWN_HALF,
+    reach: TOWN_HALF * 2.6,
+    density: quality.outskirts ?? 1,
+    lawnColor: t.lawnColor,
+    batch,
+    buildings,
+    treeKind: map.scatter?.[0]?.kind ?? 'tree',
+    // never over the strip, its approaches, or the water
+    clearOf: (x, z, pad) =>
+      !clearOfField(x, z, pad) || (map.water && z > map.water.at - 40)
+  });
 
   /* ---------- clouds ---------- */
   const cl = map.env.clouds;

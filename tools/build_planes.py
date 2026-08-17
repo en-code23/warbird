@@ -180,13 +180,125 @@ FUSE_TABLE = [
     (1.000, 0.15, 0.24, 0.15),
 ]
 
+# A long, drawn-out nose for the interceptor: the widest station sits much
+# further aft, which is what gives an inline-engined racer its profile.
+FUSE_RACER = [
+    (0.000, 0.24, 0.24, 0.02),
+    (0.090, 0.46, 0.48, 0.01),
+    (0.200, 0.68, 0.72, 0.00),
+    (0.340, 0.92, 0.96, 0.00),
+    (0.430, 1.00, 1.00, 0.02),
+    (0.560, 0.90, 0.88, 0.05),
+    (0.700, 0.70, 0.70, 0.08),
+    (0.840, 0.45, 0.49, 0.12),
+    (0.940, 0.28, 0.33, 0.15),
+    (1.000, 0.14, 0.22, 0.17),
+]
 
-def build_fuselage(name, length, radius, nose_y, segments=16, stations=22):
+# Barrel-chested and armoured, holding its depth a long way aft.
+FUSE_TANK = [
+    (0.000, 0.52, 0.50, 0.02),
+    (0.070, 0.82, 0.84, 0.01),
+    (0.170, 1.00, 1.02, 0.00),
+    (0.330, 1.02, 1.00, 0.01),
+    (0.480, 0.98, 0.94, 0.03),
+    (0.620, 0.86, 0.82, 0.06),
+    (0.760, 0.66, 0.65, 0.09),
+    (0.880, 0.44, 0.47, 0.12),
+    (0.960, 0.30, 0.35, 0.14),
+    (1.000, 0.18, 0.26, 0.15),
+]
+
+# Long parallel-sided tube with a glazed nose — a bomber, not a fighter.
+FUSE_TUBE = [
+    (0.000, 0.62, 0.60, 0.02),
+    (0.060, 0.86, 0.86, 0.01),
+    (0.140, 0.98, 0.98, 0.00),
+    (0.300, 1.00, 1.00, 0.00),
+    (0.480, 0.99, 0.98, 0.01),
+    (0.640, 0.94, 0.92, 0.03),
+    (0.780, 0.80, 0.79, 0.06),
+    (0.890, 0.58, 0.60, 0.10),
+    (0.960, 0.38, 0.43, 0.13),
+    (1.000, 0.20, 0.28, 0.15),
+]
+
+# Slim, area-ruled and blunt at the intake.
+FUSE_JET = [
+    (0.000, 0.66, 0.64, 0.02),
+    (0.080, 0.80, 0.80, 0.01),
+    (0.200, 0.92, 0.94, 0.00),
+    (0.360, 1.00, 1.00, 0.00),
+    (0.520, 0.96, 0.95, 0.01),
+    (0.680, 0.86, 0.86, 0.03),
+    (0.820, 0.74, 0.75, 0.05),
+    (0.920, 0.62, 0.64, 0.07),
+    (0.980, 0.52, 0.55, 0.08),
+    (1.000, 0.46, 0.50, 0.09),
+]
+
+"""
+Per-type shape.
+
+Every aircraft used to come off the same parametric shape with only its size,
+colours, tail count and engine count changed, so the fleet read as one aeroplane
+at six scales. These are the knobs that actually change the silhouette:
+
+  fuse        fuselage station table — the profile in plan and side view
+  wing_z      wing vertical position: high, mid or low on the fuselage
+  sweep       leading-edge sweep as a fraction of root chord
+  dihedral    degrees
+  taper       tip chord as a fraction of root
+  canopy      'bubble' | 'razorback' | 'glazed' | 'framed'
+  canopy_at   position along the body, 0 = nose
+  gear        'taildragger' | 'tricycle'
+  nose        'spinner' | 'radial' | 'intake' | 'glazed'
+  stab_z      tailplane height, for the T-tail look on the jet
+"""
+SHAPES = {
+    'sparrow': dict(
+        fuse=FUSE_TABLE, wing_z=0.34, sweep=0.05, dihedral=6.5, taper=0.68,
+        canopy='framed', canopy_at=-0.05, gear='taildragger', nose='spinner',
+        stab_z=0.10, chord_scale=1.0,
+    ),
+    'falcon': dict(
+        fuse=FUSE_TABLE, wing_z=-0.22, sweep=0.19, dihedral=5.5, taper=0.52,
+        canopy='bubble', canopy_at=-0.08, gear='taildragger', nose='spinner',
+        stab_z=0.12, chord_scale=1.0,
+    ),
+    'comet': dict(
+        fuse=FUSE_RACER, wing_z=-0.18, sweep=0.30, dihedral=4.0, taper=0.42,
+        canopy='razorback', canopy_at=0.02, gear='taildragger', nose='spinner',
+        stab_z=0.14, chord_scale=0.92,
+    ),
+    'hammer': dict(
+        fuse=FUSE_TANK, wing_z=-0.30, sweep=0.10, dihedral=7.5, taper=0.60,
+        canopy='framed', canopy_at=0.06, gear='taildragger', nose='radial',
+        stab_z=0.16, chord_scale=1.08,
+    ),
+    'fortress': dict(
+        fuse=FUSE_TUBE, wing_z=0.30, sweep=0.14, dihedral=4.5, taper=0.38,
+        canopy='glazed', canopy_at=0.20, gear='tricycle', nose='glazed',
+        stab_z=0.18, chord_scale=1.0,
+    ),
+    'vector': dict(
+        fuse=FUSE_JET, wing_z=-0.10, sweep=0.62, dihedral=2.0, taper=0.46,
+        canopy='bubble', canopy_at=0.10, gear='tricycle', nose='intake',
+        stab_z=0.62, chord_scale=0.88,
+    ),
+}
+
+DEFAULT_SHAPE = SHAPES['falcon']
+
+
+def build_fuselage(name, length, radius, nose_y, table=None,
+                   segments=16, stations=22):
     """Lofted body running from the spinner backplate aft to the tailpost."""
+    table = table or FUSE_TABLE
     secs = []
     for i in range(stations):
         t = i / (stations - 1)
-        hw, hh, cz = sample_table(FUSE_TABLE, t)
+        hw, hh, cz = sample_table(table, t)
         ring = superellipse(hw * radius, hh * radius, cz * radius, 2.45, segments)
         y = nose_y - t * length
         secs.append([(x, y, z) for (x, _, z) in ring])
@@ -470,10 +582,13 @@ def build_plane(spec):
     guns = spec["guns"]
     radius = L * 0.093
 
+    shape = SHAPES.get(spec["id"], DEFAULT_SHAPE)
+    CHORD = CHORD * shape["chord_scale"]
+
     nose_y = L * 0.38
     tail_y = -L * 0.62
     wing_y = L * 0.03          # quarter-chord station
-    root_z = -0.22
+    root_z = radius * shape["wing_z"]
 
     m_body = make_material("body", spec["body"], 0.58, 0.22)
     m_wing = make_material("wing", spec["wing"], 0.60, 0.20)
@@ -486,25 +601,31 @@ def build_plane(spec):
     hull_parts, frame_parts, props, discs, muzzles = [], [], [], [], []
 
     # ---- fuselage -------------------------------------------------------
-    hull_parts.append(assign(build_fuselage("fuse", L, radius, nose_y), m_body))
+    hull_parts.append(assign(
+        build_fuselage("fuse", L, radius, nose_y, shape["fuse"]), m_body))
 
     # Ventral radiator scoop under the wing root. The old full-length keel plank
     # read as a surfboard bolted to the belly; a scoop is what is actually there
     # on a liquid-cooled fighter and it breaks up the underside silhouette.
-    scoop = build_tube("scoop", [
-        (wing_y + CHORD * 0.34, radius * 0.30, 0),
-        (wing_y + CHORD * 0.05, radius * 0.40, 0),
-        (wing_y - CHORD * 0.30, radius * 0.36, 0),
-        (wing_y - CHORD * 0.52, radius * 0.22, 0),
-    ], cap_start=True, cap_end=True)
-    scoop.scale = (1.55, 1.0, 0.66)
-    scoop.location = (0, 0, -radius * 0.80)
-    hull_parts.append(assign(scoop, m_trim))
+    # Only the liquid-cooled types need one. A radial is air-cooled, a bomber
+    # puts its radiators in the nacelles, and a jet has none at all.
+    if shape["nose"] == "spinner" and engines == 1:
+        scoop = build_tube("scoop", [
+            (wing_y + CHORD * 0.34, radius * 0.30, 0),
+            (wing_y + CHORD * 0.05, radius * 0.40, 0),
+            (wing_y - CHORD * 0.30, radius * 0.36, 0),
+            (wing_y - CHORD * 0.52, radius * 0.22, 0),
+        ], cap_start=True, cap_end=True)
+        scoop.scale = (1.55, 1.0, 0.66)
+        scoop.location = (0, 0, -radius * 0.80)
+        hull_parts.append(assign(scoop, m_trim))
 
     # ---- wings ----------------------------------------------------------
+    tip_chord = CHORD * shape["taper"]
     frame_parts.append(assign(build_surface(
-        "wing", SPAN, CHORD, CHORD * 0.52, CHORD * 0.19,
-        math.radians(5.5), math.radians(-2.0), 0.13, wing_y, root_z,
+        "wing", SPAN, CHORD, tip_chord, CHORD * shape["sweep"],
+        math.radians(shape["dihedral"]), math.radians(-2.0), 0.13,
+        wing_y, root_z,
     ), m_wing))
 
     # ---- tail -----------------------------------------------------------
@@ -512,7 +633,8 @@ def build_plane(spec):
     frame_parts.append(assign(build_surface(
         "stab", stab_span, CHORD * 0.52, CHORD * 0.32, CHORD * 0.16,
         math.radians(3), math.radians(0), 0.11,
-        tail_y + L * 0.11, 0.12, sections=8, profile_points=14,
+        tail_y + L * 0.11, radius * shape["stab_z"],
+        sections=8, profile_points=14,
     ), m_wing))
 
     fin_h = L * 0.20
@@ -559,20 +681,37 @@ def build_plane(spec):
         discs.append(empty(f"DISC_{index}", (px, py + 0.06, pz), prop_r))
 
     if engines == 1 and not jet:
-        # No cowl part at all: the fuselage nose already tapers into the
-        # spinner. A drum over it read as a barrel and a ring read as a collar.
-        exhaust_z = radius * 0.34
-        for side in (1, -1):
-            for i in range(3):
-                st = cylinder("stack", radius * 0.075, radius * 0.26, axis="Y")
-                st.location = (side * radius * 0.62,
-                               nose_y - 0.95 - i * radius * 0.32, exhaust_z)
-                st.rotation_euler = (math.radians(8), 0, math.radians(side * -12))
-                hull_parts.append(assign(st, m_dark))
+        if shape["nose"] == "radial":
+            # A radial sits in a fat drum cowl with cooling gills — the reason
+            # the ground-attack aircraft reads as blunt-nosed from head on.
+            cowl = build_tube("cowl", [
+                (nose_y + 0.10, radius * 0.86, 0),
+                (nose_y - 0.20, radius * 1.02, 0),
+                (nose_y - 0.85, radius * 1.00, 0),
+                (nose_y - 1.05, radius * 0.90, 0),
+            ], cap_start=False, cap_end=False)
+            hull_parts.append(assign(cowl, m_body))
+            gills = build_tube("gills", [
+                (nose_y - 0.92, radius * 1.03, 0),
+                (nose_y - 1.06, radius * 0.94, 0),
+            ], cap_start=False, cap_end=False)
+            hull_parts.append(assign(gills, m_dark))
+        else:
+            # Inline engine: the fuselage nose already tapers into the spinner.
+            # A drum over it read as a barrel and a ring read as a collar.
+            exhaust_z = radius * 0.34
+            for side in (1, -1):
+                for i in range(3):
+                    st = cylinder("stack", radius * 0.075, radius * 0.26, axis="Y")
+                    st.location = (side * radius * 0.62,
+                                   nose_y - 0.95 - i * radius * 0.32, exhaust_z)
+                    st.rotation_euler = (math.radians(8), 0, math.radians(side * -12))
+                    hull_parts.append(assign(st, m_dark))
 
         # 0.32 semi-span keeps the blade tips clear of the ground with the tail
         # down; the old 0.45 put a vertical blade half a metre into the runway.
-        add_prop(0, nose_y - 0.04, 0, SPAN * 0.32, 0, radius * 0.30)
+        hub = radius * (0.42 if shape["nose"] == "radial" else 0.30)
+        add_prop(0, nose_y - 0.04, 0, SPAN * 0.32, 0, hub)
 
     else:
         per_side = max(1, round(engines / 2))
@@ -605,14 +744,47 @@ def build_plane(spec):
             hull_parts.append(assign(intake, m_dark))
 
     # ---- canopy ---------------------------------------------------------
-    canopy_y = -L * 0.08
-    canopy_len = L * 0.30
+    # Four glasshouse styles, because the greenhouse is the single most
+    # recognisable part of a warbird's profile from the side.
+    style = shape["canopy"]
+    canopy_y = L * shape["canopy_at"]
+
+    if style == "bubble":
+        canopy_len, cw, ch, cz = L * 0.30, 0.80, 0.78, 0.52
+    elif style == "razorback":
+        canopy_len, cw, ch, cz = L * 0.24, 0.68, 0.60, 0.58
+    elif style == "glazed":
+        canopy_len, cw, ch, cz = L * 0.20, 0.74, 0.52, 0.60
+    else:  # framed — a taller, boxier trainer/attacker hood
+        canopy_len, cw, ch, cz = L * 0.26, 0.86, 0.86, 0.48
+
     canopy = build_canopy(
         "canopy",
         canopy_y + canopy_len * 0.5, canopy_y - canopy_len * 0.5,
-        radius * 0.80, radius * 0.74, radius * 0.52,
+        radius * cw, radius * ch, radius * cz,
     )
     glass = assign(canopy, m_glass)
+
+    if style == "razorback":
+        # A spine running from the canopy back to the fin, which is what makes
+        # a razorback a razorback.
+        spine = build_tube("spine", [
+            (canopy_y - canopy_len * 0.45, radius * 0.34, 0),
+            (tail_y + L * 0.30, radius * 0.24, 0),
+            (tail_y + L * 0.17, radius * 0.14, 0),
+        ], cap_start=False, cap_end=False)
+        spine.location = (0, 0, radius * 0.52)
+        spine.scale = (1.0, 1.0, 0.72)
+        hull_parts.append(assign(spine, m_body))
+
+    if style == "glazed":
+        # Bomb-aimer's nose glazing.
+        nose_glass = build_canopy(
+            "noseglass",
+            nose_y - L * 0.02, nose_y - L * 0.14,
+            radius * 0.72, radius * 0.70, -radius * 0.10,
+        )
+        frame_parts.append(assign(nose_glass, m_glass))
 
     headrest = box("headrest", radius * 0.52, 0.26, radius * 0.34)
     headrest.location = (0, canopy_y - canopy_len * 0.30, radius * 0.80)
@@ -623,9 +795,10 @@ def build_plane(spec):
     # them hanging in clear air once the wing tapered and swept away from them.
     def wing_station(x_abs):
         u = min(1.0, abs(x_abs) / SPAN)
-        chord = lerp(CHORD, CHORD * 0.52, u)
-        quarter = wing_y - CHORD * 0.19 * u
-        return quarter + 0.25 * chord, chord, root_z + math.sin(math.radians(5.5)) * SPAN * u
+        chord = lerp(CHORD, tip_chord, u)
+        quarter = wing_y - CHORD * shape["sweep"] * u
+        rise = math.sin(math.radians(shape["dihedral"])) * SPAN * u
+        return quarter + 0.25 * chord, chord, root_z + rise
 
     # ---- guns -----------------------------------------------------------
     for i in range(guns):
@@ -667,14 +840,27 @@ def build_plane(spec):
         w.location = (x, y, wz - strut_len)
         frame_parts.append(assign(w, m_rubber))
 
-    tail_wheel_r = radius * 0.20
-    tail_strut = strut_len * 0.40
-    tleg = cylinder("tleg", 0.07, tail_strut, axis="Z")
-    tleg.location = (0, tail_y + L * 0.08, -radius * 0.5 - tail_strut)
-    frame_parts.append(assign(tleg, m_dark))
-    tw = build_wheel("twheel", tail_wheel_r, tail_wheel_r * 0.8)
-    tw.location = (0, tail_y + L * 0.08, -radius * 0.5 - tail_strut)
-    frame_parts.append(assign(tw, m_rubber))
+    # Third leg: a taildragger carries it under the tail, a tricycle under the
+    # nose. It changes the whole stance on the ground, so it is worth varying.
+    if shape["gear"] == "tricycle":
+        nose_r = radius * 0.30
+        nose_strut = strut_len - (wheel_r - nose_r)
+        nose_at = nose_y - L * 0.14
+        nleg = cylinder("nleg", 0.08, nose_strut, axis="Z")
+        nleg.location = (0, nose_at, root_z - nose_strut)
+        frame_parts.append(assign(nleg, m_dark))
+        nw = build_wheel("nwheel", nose_r, nose_r * 0.8)
+        nw.location = (0, nose_at, root_z - nose_strut)
+        frame_parts.append(assign(nw, m_rubber))
+    else:
+        tail_wheel_r = radius * 0.20
+        tail_strut = strut_len * 0.40
+        tleg = cylinder("tleg", 0.07, tail_strut, axis="Z")
+        tleg.location = (0, tail_y + L * 0.08, -radius * 0.5 - tail_strut)
+        frame_parts.append(assign(tleg, m_dark))
+        tw = build_wheel("twheel", tail_wheel_r, tail_wheel_r * 0.8)
+        tw.location = (0, tail_y + L * 0.08, -radius * 0.5 - tail_strut)
+        frame_parts.append(assign(tw, m_rubber))
 
     ground_z = root_z - strut_len - wheel_r
 

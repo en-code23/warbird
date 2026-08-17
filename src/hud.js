@@ -84,6 +84,19 @@ export class Hud {
     this.root.classList.add('hurt');
   }
 
+  /**
+   * Runway resupply progress.
+   * @param {number} progress 0..1; 0 hides the bar
+   */
+  setResupply(progress) {
+    const el = this._resupply ??= document.getElementById('v-resupply');
+    const fill = this._resupplyFill ??= document.getElementById('v-resupply-fill');
+    if (!el || !fill) return;
+    const on = progress > 0;
+    if (el.hidden === on) el.hidden = !on;
+    if (on) fill.style.width = `${Math.round(progress * 100)}%`;
+  }
+
   killFeed(killer, victim) {
     const row = document.createElement('div');
     row.className = 'feed-row';

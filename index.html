@@ -54,6 +54,10 @@
         <div class="warn brake" id="v-brake">BRAKE</div>
         <div class="warn dmg" id="v-dmg">DAMAGE</div>
       </div>
+      <div class="resupply" id="v-resupply" hidden>
+        <span class="resupply-label">REARMING</span>
+        <span class="resupply-track"><span class="resupply-fill" id="v-resupply-fill"></span></span>
+      </div>
     </div>
 
     <div class="hud-corner br">
@@ -209,8 +213,30 @@
       <span class="coin">&#9679;</span><span id="v-coins">0</span>
     </div>
 
+    <!-- ---------- first run: choose a callsign ---------- -->
+    <section class="screen" data-screen="callsign" hidden>
+      <div class="panel narrow">
+        <h1>Warbird</h1>
+        <p class="sub">Pick your callsign. You keep it — this is asked once.</p>
+        <form class="callsign-form" id="callsign-form" autocomplete="off">
+          <label class="field">
+            <span>Callsign</span>
+            <input type="text" id="callsign-input" maxlength="14" required
+                   placeholder="Maverick" autocomplete="off" spellcheck="false"
+                   aria-describedby="callsign-error">
+          </label>
+          <p class="field-error" id="callsign-error" role="alert"></p>
+          <button class="btn" id="callsign-go" type="submit">Take off</button>
+        </form>
+        <p class="fineprint">
+          Stored on this device and registered with a lobby server the first time
+          you join one, so nobody else can fly under your name there.
+        </p>
+      </div>
+    </section>
+
     <!-- ---------- main menu ---------- -->
-    <section class="screen" data-screen="menu">
+    <section class="screen" data-screen="menu" hidden>
       <div class="panel">
         <h1>Warbird</h1>
         <p class="sub" id="menu-sub">Choose a game mode</p>

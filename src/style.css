@@ -1082,6 +1082,124 @@ body.touch-mode .down-hint { display: none; }
   #down { animation: none; }
 }
 
+/* ---------- shop model preview ---------- */
+
+.shop-view {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 22 / 15;
+  margin: 10px 0 2px;
+  background:
+    radial-gradient(ellipse at 50% 120%, rgba(var(--hud-rgb), 0.10), transparent 65%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.5));
+  border: 1px solid rgba(var(--hud-rgb), 0.12);
+}
+
+/* ---------- runway resupply ---------- */
+
+.resupply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.resupply[hidden] { display: none; }
+
+.resupply-label {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--amber);
+}
+
+.resupply-track {
+  width: 104px;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(232, 161, 60, 0.4);
+}
+
+.resupply-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(232, 161, 60, 0.7);
+}
+
+/* ==========================================================================
+   Callsign
+   ==========================================================================
+   The first screen anyone sees. One field, one button, no navigation — the
+   decision is small and permanent, so the screen should feel like signing a
+   form rather than filling in a profile.
+*/
+
+.panel.narrow { max-width: 480px; }
+
+.callsign-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field > span {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+
+#callsign-input {
+  padding: 14px 16px;
+  font: inherit;
+  /* 16px minimum stops iOS zooming the viewport when the field takes focus */
+  font-size: 16px;
+  letter-spacing: 0.14em;
+  color: var(--hud);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(var(--hud-rgb), 0.3);
+  border-radius: 0;
+}
+
+#callsign-input::placeholder { color: rgba(var(--hud-rgb), 0.22); }
+#callsign-input:focus {
+  outline: none;
+  border-color: var(--hud);
+  box-shadow: 0 0 0 1px var(--hud);
+}
+#callsign-input[aria-invalid='true'] { border-color: var(--warn); }
+
+.field-error {
+  min-height: 1.2em;      /* reserved, so the button never jumps */
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+}
+
+.fineprint {
+  margin: 18px 0 0;
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 0.06em;
+  color: rgba(var(--hud-rgb), 0.32);
+}
+
+/* the lobby shows the chosen callsign; it is not editable there */
+#lobby-name {
+  opacity: 0.75;
+  cursor: default;
+}
+
 /* ==========================================================================
    Settings strip
    ==========================================================================

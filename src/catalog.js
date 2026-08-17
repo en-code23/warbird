@@ -215,6 +215,8 @@ export const GUNS = [
     rpm: 1150,
     velocity: 760,
     spread: 0.016,
+    convergence: 220,   // short — a rifle round is spent quickly
+    falloffFloor: 0.5,
     ammo: 900,
     tracer: 0xffe066,
     calibre: '7.9 mm'
@@ -230,6 +232,8 @@ export const GUNS = [
     rpm: 780,
     velocity: 870,
     spread: 0.012,
+    convergence: 280,   // the classic 300-yard harmonisation
+    falloffFloor: 0.45,
     ammo: 600,
     tracer: 0xffd24a,
     calibre: '12.7 mm'
@@ -246,6 +250,8 @@ export const GUNS = [
     rpm: 600,
     velocity: 800,
     spread: 0.010,
+    convergence: 250,   // shells arrive with weight, so close is better
+    falloffFloor: 0.45,
     ammo: 280,
     tracer: 0xff9a3c,
     calibre: '20 mm'
@@ -262,6 +268,8 @@ export const GUNS = [
     rpm: 380,
     velocity: 690,
     spread: 0.009,
+    convergence: 200,   // slow, heavy shells; set up for a close pass
+    falloffFloor: 0.4,
     ammo: 140,
     tracer: 0xff5a2a,
     calibre: '30 mm'
@@ -278,6 +286,8 @@ export const GUNS = [
     rpm: 3600,
     velocity: 910,
     spread: 0.020,
+    convergence: 300,   // volume of fire covers a longer setting
+    falloffFloor: 0.55,
     ammo: 1800,
     spinUp: 0.45,
     tracer: 0xff3b1f,

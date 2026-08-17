@@ -71,6 +71,22 @@
 | Mobile respawning | **Done** — it was genuinely unreachable before, §8 |
 | Fullscreen for phone | **Done** — explicit toggle plus auto-entry on launch, §8 |
 
+### Fourth round
+
+| Asked for | Status |
+|---|---|
+| Callsign chosen once at the start | **Done** — `src/identity.js`, first-run screen |
+| Secure storage for all usernames | **Done, with limits** — SQLite registry, name bound to a hash of a device secret. Stops impersonation on a server; is **not** an account system. `server/registry.js` |
+| Letters w/a/s/d/e/q unusable in inputs | **Fixed** — the flight controls were calling `preventDefault()` on every keydown on the page, §10 |
+| More realistic shooting | **Done** — gun harmonisation, dispersion in the airframe's axes, damage falloff |
+| Many players spawning without crashing | **Done** — spawn slots + grace, §11 |
+| Bigger city, environment outside it, more detail | **Done** — cities ~2.7x, rooftop plant, fields/woods/hamlets |
+| Rearm without respawning | **Done** — rolling resupply on the strip |
+| Different 3D models per plane type | **Done** — per-type shape table in the Blender builder |
+| Easier bomb aiming | **Done** — sight now integrates real drag; error 38–297 m → 2–5 m |
+| Most points gets extra coins | **Done** — victory bonus scaled by lobby size |
+| 3D model preview in the shop | **Done** — `src/shopPreview.js`, one shared WebGL context |
+
 ---
 
 ## 1. Why there is no Rust, and where the time actually went
@@ -450,3 +466,57 @@ genuine Safari failure mode, so it is wrapped in `capture()` in `touch.js`.
 - More than two multiplayer clients at once.
 - iPhone Safari specifically (no Fullscreen API; MP3 decode padding may differ,
   which is why `leadingSilence()` measures it at runtime instead of assuming).
+
+---
+
+## 10. The input bug that hid the keyboard
+
+`addEventListener('keydown')` in `main.js` called `preventDefault()` for every
+key in `HELD` — W, A, S, D, Q, E, B, Space, arrows — on **every** keydown
+anywhere on the page, including while a text field had focus. Most of the
+alphabet could not be typed into the callsign or lobby-password boxes.
+
+Fixed with an `isTyping(e)` guard that bails out when the event target is an
+input, textarea, select or contenteditable. `keyup` is deliberately **not**
+guarded: a key pressed before focus moved into a field still has to be released,
+or the aircraft holds that input forever.
+
+Worth remembering if you add more global shortcuts.
+
+---
+
+## 11. Multiplayer spawn slots
+
+Every player used to spawn on `runway.start` — one point. The ram check kills
+anything within 7 units, so a match began with the entire lobby destroying each
+other before anyone touched a control, and every respawn did it again.
+
+`spawnSlot()` sorts the room's player ids and takes an index, which every client
+computes identically without the server arbitrating. Slots are three abreast at
+14 m and then 26 m further back down the strip. Slot 0 takes the centreline with
+no offset so singleplayer is untouched.
+
+Two things the test caught that are worth keeping in the test:
+
+- The first version mapped lane as `(slot % 3) - 1`, which put slot 0 and slot 1
+  on the same spot — reproducing the exact bug, for two players, the commonest
+  case. The lane order must start at the centre: `[0, -1, 1][slot % 3]`.
+- Verify with 16 ids and assert minimum pairwise separation ≥ the ram radius.
+  Measured 14 m against a 7 m radius.
+
+There is also a 2.5 s `state.spawnGrace` covering both the local ram check and
+incoming `damage()`, because the ram is reported by the *other* player — a
+window that only guarded our own check would protect nobody.
+
+---
+
+## 12. Things still worth doing
+
+- **AI aircraft.** Flak is still the only thing that fights back.
+- **Server-authoritative hits.** The shooter still reports damage.
+- **Bullet time-of-flight.** Gunnery is hitscan, so `velocity` in the gun table
+  affects nothing but the description. Convergence and falloff are real now;
+  lead is not.
+- **Cockpit interior** — still the weakest geometry in the project.
+- **Field hedgerows.** The countryside has fields, woods and hamlets but no
+  boundaries between fields; instanced hedgerows would sell it for one draw call.
