@@ -171,7 +171,23 @@
       <button class="t-btn t-sw" id="t-scope" aria-label="Toggle scope">SCOPE</button>
       <button class="t-btn t-sw" id="t-view" aria-label="Change view">VIEW</button>
       <button class="t-btn t-sw" id="t-brake" aria-label="Wheel brakes">BRAKE</button>
+      <button class="t-btn t-sw" id="t-full" aria-label="Toggle fullscreen">FULL</button>
       <button class="t-btn t-sw" id="t-menu" aria-label="Menu">MENU</button>
+    </div>
+  </div>
+
+  <!-- ==================== SHOT DOWN ====================
+       The respawn action needs to be something you can hit with a thumb. It
+       used to be a line of text telling you to press R, which on a phone is
+       a dead end you cannot fly out of. -->
+  <div id="down" hidden>
+    <div class="down-card" role="alertdialog" aria-labelledby="down-title"
+         aria-describedby="down-reason">
+      <p class="down-kicker">Aircraft lost</p>
+      <h2 id="down-title">Down</h2>
+      <p class="down-reason" id="down-reason"></p>
+      <button class="down-btn" id="down-respawn" type="button">Respawn</button>
+      <p class="down-hint">or press <kbd>R</kbd></p>
     </div>
   </div>
 
@@ -202,6 +218,17 @@
         <div class="menu-actions">
           <button class="btn" data-goto="hangar">Hangar &amp; Shop</button>
           <button class="btn ghost" data-goto="help">Controls</button>
+        </div>
+        <div class="settings" id="settings-row">
+          <button class="toggle is-on" id="opt-music" type="button" aria-pressed="true">
+            <span class="toggle-led"></span>Music
+          </button>
+          <button class="toggle is-on" id="opt-sound" type="button" aria-pressed="true">
+            <span class="toggle-led"></span>Sound
+          </button>
+          <button class="toggle" id="opt-full" type="button" aria-pressed="false" hidden>
+            <span class="toggle-led"></span>Fullscreen
+          </button>
         </div>
       </div>
     </section>
@@ -342,6 +369,9 @@
           <tr><td>GUNS</td><td>Hold to fire</td></tr>
           <tr><td>BOMB</td><td>Release one bomb</td></tr>
           <tr><td>&#9664; &#9654;</td><td>Rudder — steering on the ground, trim in the air</td></tr>
+          <tr><td>SCOPE VIEW BRAKE</td><td>Panel switches, top right</td></tr>
+          <tr><td>FULL</td><td>Fullscreen. A sortie enters it for you on launch</td></tr>
+          <tr><td>RESPAWN</td><td>Appears on the card when you are shot down</td></tr>
         </table>
 
         <h2 class="section-head">Keyboard</h2>
@@ -358,6 +388,9 @@
           <tr><td><kbd>M</kbd></td><td>Menu</td></tr>
           <tr><td><kbd>R</kbd></td><td>Respawn</td></tr>
         </table>
+        <p class="hint">
+          Music, sound and fullscreen have toggles at the bottom of the main menu.
+        </p>
         <p class="hint">
           Bank to turn — the nose follows the roll, and the rudder is only for
           trimming. Below your aircraft's stall speed the wing stops flying. The

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createPlane } from './plane.js';
+import { buildPlane, preloadPlane, disposePlane } from './planeModel.js';
 import { createWorld, disposeWorld } from './world.js';
 import { ChunkWorld, FREEFLIGHT_ENV } from './chunks.js';
 import { Pedestrians } from './pedestrians.js';
@@ -14,7 +14,10 @@ import { Economy } from './economy.js';
 import { formatClock } from './modes.js';
 import { planeById } from './catalog.js';
 import { TIERS, Governor, detectTier, guessTier, storeTier, isTouchDevice } from './quality.js';
-import { TouchControls, setupOrientation, goFullscreen } from './touch.js';
+import {
+  TouchControls, setupOrientation, goFullscreen,
+  toggleFullscreen, fullscreenSupported, isFullscreen, onFullscreenChange
+} from './touch.js';
 
 /* ==========================================================================
    Constants
@@ -188,6 +191,17 @@ function applyQuality() {
 
 const effects = new Effects(scene);
 const audio = new Audio();
+
+// Browsers refuse to start an AudioContext outside a user gesture, so the menu
+// theme waits for the first click or key anywhere on the page. Once is enough.
+addEventListener('pointerdown', firstGesture, { once: true });
+addEventListener('keydown', firstGesture, { once: true });
+
+function firstGesture() {
+  audio.start();
+  audio.resume();
+  if (!session.running) audio.playMusic();
+}
 const hud = new Hud();
 const economy = new Economy();
 const net = new Net();
@@ -255,6 +269,10 @@ let plane = null;
 let cockpit = null;
 let planeSpec = planeById(economy.data.loadout.plane);
 
+// Start fetching the equipped airframe while the player is still in the menu,
+// so the first launch is as quick as every one after it.
+preloadPlane(planeSpec.id);
+
 /* ==========================================================================
    Aircraft construction
    ========================================================================== */
@@ -263,17 +281,11 @@ let planeSpec = planeById(economy.data.loadout.plane);
 function buildAircraft() {
   if (plane) {
     cockpit?.dispose();
-    plane.group.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry?.dispose();
-        if (o.material && !Array.isArray(o.material)) o.material.dispose();
-      }
-    });
-    plane.group.removeFromParent();
+    disposePlane(plane);
   }
 
   planeSpec = economy.loadout.plane;
-  plane = createPlane(planeSpec.model, { guns: planeSpec.guns });
+  plane = buildPlane(planeSpec, { guns: planeSpec.guns });
   scene.add(plane.group);
   cockpit = new Cockpit(plane.group, plane.dimensions, plane.eye);
   cockpit.visible = state.cockpit;
@@ -327,7 +339,12 @@ function teardownWorld() {
    Launching a sortie
    ========================================================================== */
 
-function launch({ mode, map, duration, room }) {
+async function launch({ mode, map, duration, room }) {
+  // Wait for the airframe before building the world. It is a ~140 KB fetch that
+  // is already cached after the first sortie, and taking it here means you
+  // never launch into the fallback model just because the menu was quick.
+  await preloadPlane(economy.loadout.plane.id);
+
   teardownWorld();
   buildAircraft();
 
@@ -385,6 +402,7 @@ function launch({ mode, map, duration, room }) {
   nextFrameDue = 0;
   audio.start();
   audio.resume();
+  audio.stopMusic(1.2);
   // Launching is a user gesture, which is the only moment the browser will
   // grant fullscreen and an orientation lock.
   goFullscreen();
@@ -419,6 +437,7 @@ function resetPlane() {
   weapons.rearm();
   weapons.reset();
   hud.clearBanner();
+  hideDownCard();
 }
 
 /* ==========================================================================
@@ -482,10 +501,55 @@ const touch = new TouchControls({
   onBomb: () => dropBomb(),
   onView: () => setCockpit(!state.cockpit),
   onScope: (on) => setScoped(on),
-  onMenu: () => openMenu()
+  onMenu: () => openMenu(),
+  onFullscreen: () => toggleFullscreen()
 });
 
 setupOrientation();
+
+/* ---------- settings strip ---------- */
+
+/**
+ * Menu toggles. Each one is a lamp that reflects real state rather than a
+ * remembered intent, so a fullscreen exit the browser performed on its own
+ * still turns the light off.
+ */
+const optMusic = document.getElementById('opt-music');
+const optSound = document.getElementById('opt-sound');
+const optFull = document.getElementById('opt-full');
+
+function setLamp(el, on) {
+  if (!el) return;
+  el.classList.toggle('is-on', on);
+  el.setAttribute('aria-pressed', String(on));
+}
+
+optMusic?.addEventListener('click', () => {
+  const on = !optMusic.classList.contains('is-on');
+  setLamp(optMusic, on);
+  audio.start();
+  audio.setMusicEnabled(on);
+});
+
+optSound?.addEventListener('click', () => {
+  const on = !optSound.classList.contains('is-on');
+  setLamp(optSound, on);
+  audio.start();
+  audio.setMuted(!on);
+});
+
+if (optFull && fullscreenSupported()) {
+  optFull.hidden = false;
+  optFull.addEventListener('click', () => toggleFullscreen());
+}
+
+// The browser can drop out of fullscreen on its own (swipe down, Escape), so
+// the lamps follow the real state rather than what we last asked for.
+onFullscreenChange((on) => {
+  touch.setFullscreen(on);
+  setLamp(optFull, on);
+});
+setLamp(optFull, isFullscreen());
 
 /** Keyboard axis, falling back to the touch axis when no key is held. */
 function mix(neg, pos, touchValue) {
@@ -729,11 +793,39 @@ function crash(reason) {
   touch.release();
   if (session.room) net.reportDeath(state.lastHitBy);
 
-  hud.banner(`DOWN<small>${reason} — press R to respawn</small>`, 'bad', 999);
+  lastDownReason = reason ?? 'Shot down';
+  showDownCard(lastDownReason);
 }
 
+/* ---------- shot-down card ---------- */
+
+const downEl = document.getElementById('down');
+const downReason = document.getElementById('down-reason');
+let lastDownReason = 'Shot down';
+
+function showDownCard(reason) {
+  if (!downEl) return;
+  if (downReason) downReason.textContent = reason;
+  downEl.hidden = false;
+  // Focus the action so a keyboard or switch-control user lands on it and can
+  // press Enter. Skipped on touch, where there is nothing to focus with and the
+  // ring would just be decoration on a button you are about to tap anyway.
+  if (!touchDevice) {
+    requestAnimationFrame(() => document.getElementById('down-respawn')?.focus());
+  }
+}
+
+function hideDownCard() {
+  if (downEl) downEl.hidden = true;
+}
+
+document.getElementById('down-respawn')?.addEventListener('click', () => respawn());
+
 function respawn() {
+  // Still allowed while alive — R has always doubled as "put me back on the
+  // runway", and the HUD legend promises that.
   if (!world) return;
+  hideDownCard();
   resetPlane();
   setCockpit(state.cockpit);
   hud.banner('CLEARED FOR TAKEOFF', 'good', 1.6);
@@ -1003,7 +1095,7 @@ function syncRemotes(dt) {
     let r = remotes.get(id);
     if (!r) {
       const spec = planeById(p.plane ?? 'falcon');
-      const model = createPlane(spec.model, { guns: spec.guns });
+      const model = buildPlane(spec, { guns: spec.guns });
       scene.add(model.group);
       r = {
         id, model, group: model.group, name: p.name, alive: true,
@@ -1032,13 +1124,7 @@ function syncRemotes(dt) {
 }
 
 function disposeRemote(r) {
-  r.group.traverse((o) => {
-    if (o.isMesh) {
-      o.geometry?.dispose();
-      if (o.material && !Array.isArray(o.material)) o.material.dispose();
-    }
-  });
-  r.group.removeFromParent();
+  disposePlane(r.model);
 }
 
 function clearRemotes() {
@@ -1124,6 +1210,8 @@ function endSortie(reason) {
   running = false;
   weapons.trigger = false;
   touch.release();
+  hideDownCard();
+  audio.playMusic();
 
   // Half the score was too thin against the price list; see catalog.js for the
   // retuned curve. Landings pay a flat completion bonus on top, so flying the
@@ -1158,7 +1246,9 @@ function openMenu() {
   weapons.trigger = false;
   touch.release();
   hud.hide();
+  hideDownCard();
   ui.show('menu');
+  audio.playMusic();
 }
 
 function resumeFromMenu() {
@@ -1169,6 +1259,9 @@ function resumeFromMenu() {
   running = true;
   governor.reset();
   audio.resume();
+  audio.stopMusic(0.8);
+  // Coming back to a wreck: the card has to come back with it.
+  if (!state.alive) showDownCard(lastDownReason);
 }
 
 /* ==========================================================================
@@ -1462,7 +1555,7 @@ net.handle = ((original) => function patched(msg) {
 
 window.sim = {
   state, session, economy, net, weapons, effects, camera, scene, hud,
-  renderer, touch, governor,
+  renderer, touch, governor, audio,
   get quality() { return { pref: tierPref, active: tierName, renderScale, ...quality }; },
   setTier,
   get plane() { return plane; },

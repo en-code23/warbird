@@ -312,11 +312,20 @@ export class TouchControls {
     this.scopeBtn = this.button('t-scope', { toggle: (on) => o.onScope?.(on) });
     this.button('t-view', { onDown: () => o.onView?.() });
     this.button('t-menu', { onDown: () => o.onMenu?.() });
+
+    // Offered only where it works — on iPhone Safari there is no API behind it.
+    this.fullBtn = this.button('t-full', { onDown: () => o.onFullscreen?.() });
+    if (this.fullBtn && !fullscreenSupported()) this.fullBtn.el.hidden = true;
   }
 
   /** Keeps the scope button lit in sync when the state changes elsewhere. */
   setScoped(on) {
     this.scopeBtn?.set(on);
+  }
+
+  /** Keeps the fullscreen lamp in sync, including exits we did not initiate. */
+  setFullscreen(on) {
+    this.fullBtn?.set(on);
   }
 }
 
@@ -341,22 +350,87 @@ export function setupOrientation() {
   check();
 }
 
-/**
- * Goes fullscreen and locks landscape on the first real interaction.
- *
- * This is a genuine performance measure, not polish: with the browser chrome
- * gone the compositor stops blending the page against a scrolling toolbar every
- * frame, and the viewport stops resizing as the address bar hides and shows.
- */
-export async function goFullscreen() {
-  if (!isTouchDevice()) return;
+/* ======================================================================
+   Fullscreen
+   ======================================================================
+   Going fullscreen is a genuine performance measure, not polish: with the
+   browser chrome gone the compositor stops blending the page against a
+   scrolling toolbar every frame, and the viewport stops resizing as the
+   address bar hides and shows — which on a phone otherwise triggers a full
+   renderer resize mid-flight.
+
+   Everything here is feature-detected rather than assumed. iPhone Safari
+   exposes no Fullscreen API on the document element at all, so the control
+   has to be hidden there rather than offered and silently doing nothing.
+*/
+
+const fsEl = () => document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+
+/** True if this browser can actually go fullscreen. */
+export function fullscreenSupported() {
+  const el = document.documentElement;
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen);
+}
+
+export function isFullscreen() {
+  return !!fsEl();
+}
+
+async function enter() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
+  else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+  // Landscape lock only sticks while fullscreen, and only on Android.
   try {
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
-    }
     await screen.orientation?.lock?.('landscape');
   } catch {
-    // Both are best-effort: iOS Safari has neither, and the game is still
-    // playable without them.
+    /* unsupported or refused; the rotate nag covers it */
+  }
+}
+
+async function leave() {
+  try {
+    screen.orientation?.unlock?.();
+  } catch {
+    /* not supported */
+  }
+  if (document.exitFullscreen) await document.exitFullscreen();
+  else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+}
+
+/**
+ * Explicit user-driven toggle. Works on desktop too — a flight sim in a
+ * maximised window is a reasonable thing to want.
+ * @returns {Promise<boolean>} the resulting state
+ */
+export async function toggleFullscreen() {
+  if (!fullscreenSupported()) return false;
+  try {
+    if (fsEl()) await leave();
+    else await enter();
+  } catch {
+    /* the browser refused; the button state resyncs from fullscreenchange */
+  }
+  return isFullscreen();
+}
+
+/**
+ * Best-effort automatic entry when a sortie launches, which is the one moment
+ * we are guaranteed to be inside a user gesture. Touch only — grabbing the
+ * whole screen unasked on desktop would be hostile.
+ */
+export async function goFullscreen() {
+  if (!isTouchDevice() || fsEl() || !fullscreenSupported()) return;
+  try {
+    await enter();
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Calls back whenever fullscreen state changes, so UI can stay in sync. */
+export function onFullscreenChange(fn) {
+  for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
+    document.addEventListener(ev, () => fn(isFullscreen()));
   }
 }

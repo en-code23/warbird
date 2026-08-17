@@ -46,12 +46,21 @@ npm run server       # ws://localhost:8080
 | **GUNS** | Hold to fire |
 | **BOMB** | Release one bomb |
 | **&#9664; &#9654;** | Rudder |
-| **SCOPE / VIEW / BRAKE / MENU** | Panel switches, top right |
+| **SCOPE / VIEW / BRAKE / FULL / MENU** | Panel switches, top right |
+| **RESPAWN** | Appears when you are shot down |
 
 The stick has no fixed base on purpose: a virtual joystick pinned to one corner
 makes you look at your thumb to find it, and the thing you need to be looking at
 is the horizon. Deflection is squared, so small movements near centre are gentle
 — which is what makes a landing flyable with a thumb at all.
+
+**FULL** toggles fullscreen, and a sortie enters it automatically on launch —
+that is the one moment the browser is guaranteed to be inside a user gesture.
+This is a performance measure as much as a comfort one: with the browser chrome
+gone the compositor stops blending the page against a scrolling toolbar every
+frame, and the viewport stops resizing as the address bar hides and shows, which
+otherwise forces a full renderer resize mid-flight. The switch is hidden on
+iPhone Safari, which exposes no Fullscreen API to hide behind it.
 
 ### Keyboard
 
@@ -67,7 +76,11 @@ is the horizon. Deflection is squared, so small movements near centre are gentle
 | `Space` | Release a bomb |
 | `C` | Chase / cockpit view |
 | `M` or `Esc` | Menu (press again to resume) |
-| `R` | Respawn |
+| `R` | Respawn (or `Enter` on the shot-down card) |
+
+Music, sound and fullscreen have toggles at the bottom of the main menu. Each is
+a lamp reflecting real state, so a fullscreen exit the browser performs on its
+own still turns the light off.
 
 **Bank to turn.** The nose follows the roll — the rudder is only for trimming and
 for steering on the ground. Below your aircraft's stall speed the wing stops
@@ -247,6 +260,41 @@ the climb-out, so every field stays usable however the scenery rolls.
 
 ---
 
+## Audio
+
+Everything in flight is synthesised live rather than sampled, so the engine
+tracks RPM continuously and a slow throttle change never sounds stepped.
+
+The engine is what you hear for an entire session, so it was rebuilt against
+measurements rather than opinion. `tools/engine-measure.js` renders the old and
+new models through an `OfflineAudioContext` and scores them. Level-matched
+(within 0.4 dB at cruise and full power):
+
+| | idle | cruise | full |
+| --- | --- | --- | --- |
+| Sensory dissonance | −69% | −57% | −47% |
+| Energy below 40 Hz | 47.9% → 0.2% | — | — |
+| Crest factor | 2.89 → 2.31 | 2.72 → 2.25 | 2.72 → 2.16 |
+
+Dissonance is the Plomp–Levelt/Sethares pairwise-partial measure — it counts
+partials close enough to share a critical band, which is what "harsh" actually
+is, and unlike a modulation-band metric it ignores broadband noise. What changed:
+
+- **A square at 2.01× the fundamental is gone.** It beat against the saw's own
+  second harmonic, which made the engine sound like it was permanently surging.
+- **The filter cutoff tracks the firing frequency** instead of sitting at a fixed
+  900 Hz, so the harmonic count stays roughly constant. The engine now gets
+  higher rather than harsher as revs rise.
+- **The chug LFO is a sine, not a sawtooth.** A sawtooth LFO at 20–60 Hz is not a
+  chug, it is ring modulation adding inharmonic sidebands.
+- **A broadband prop-wash layer** was added, which is what dominates a real
+  cockpit and lets the tonal part sit far lower.
+- **The weight sine sits in unison with the fundamental**, not an octave below.
+  An octave down is 19–52 Hz across the throttle range: inaudible on a phone and
+  pure wasted headroom. That single change accounts for most of the sub-40 Hz
+  figure above, and the lower crest factor leaves more room for gunfire and
+  explosions before the mix clips.
+
 ## Performance, and why there is no Rust in here
 
 Mobile was the goal, so the sim was profiled before anything was rewritten. The
@@ -306,6 +354,14 @@ true for devices that do not exist yet.
 
 ```
 index.html          markup, HUD, import map
+assets/
+  models/*.glb      Blender-built airframes, one per aircraft
+  audio/menu.mp3    menu theme, rendered offline by SuperCollider
+tools/
+  build_planes.py   headless Blender: catalogue specs -> GLB
+  preview_planes.py renders contact sheets of the exported models
+  build_music.scd   SuperCollider non-real-time render of the theme
+  engine-measure.js offline A/B of the engine synth (see Audio below)
 src/
   main.js           flight model, combat, scoring, camera, game loop
   catalog.js        data: aircraft, guns, bombs — stats, prices, descriptions
@@ -318,13 +374,14 @@ src/
   flak.js           anti-aircraft batteries: tracking, lead, bursts
   vehicles.js       instanced street traffic
   quality.js        quality tiers and the adaptive frame-time governor
-  touch.js          touch controls: throttle quadrant, stick, triggers
-  plane.js          aircraft model factory, parameterised per airframe
+  touch.js          touch controls: throttle quadrant, stick, triggers, fullscreen
+  planeModel.js     loads the Blender GLBs; falls back to plane.js
+  plane.js          procedural aircraft factory — the fallback airframe
   cockpit.js        cockpit interior with live canvas instruments
   weapons.js        guns, tracers, bomb ballistics, cluster and incendiary logic
   pedestrians.js    instanced street crowd
   effects.js        pooled fireballs, debris, smoke
-  audio.js          synthesised engine, guns, explosions — no audio files
+  audio.js          engine/gun/explosion synthesis + the menu theme player
   hud.js            HUD updates
   ui.js             menu, map picker, shop, lobby, results screens
   net.js            multiplayer client
@@ -343,6 +400,78 @@ Design rules worth keeping if you extend it:
   building box axis-aligned. Terrain hazards use cylinder and cone tests.
 - **Diff before touching the DOM.** The HUD writes a value only when it changes.
 
+---
+
+## Assets, and how to rebuild them
+
+Both binary assets are generated, not hand-authored, and both generators are in
+the repo. You never need to run either to play — the outputs are committed — but
+nothing here is a dead end you cannot regenerate.
+
+### Aircraft (Blender)
+
+`tools/build_planes.py` builds all six airframes and exports one GLB each:
+
+```bash
+node --input-type=module -e "import {PLANES} from './src/catalog.js'; \
+  console.log(JSON.stringify(PLANES.map(p=>({id:p.id,name:p.name,guns:p.guns,jet:!!p.jet,...p.model})),null,2))" \
+  > tools/planespecs.json
+
+/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \
+  --python tools/build_planes.py
+```
+
+It reads the same catalogue entries the shop reads, so the geometry and the
+stats cannot drift apart. Everything is a loft — a NACA 4-digit airfoil swept
+with taper, sweep, dihedral and washout for the flying surfaces, superellipse
+stations for the fuselage — which is the reason to leave three.js primitives
+behind rather than an aesthetic preference. Around 5–9k triangles each, 110–200 KB.
+
+To look at what came out:
+
+```bash
+/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \
+  --python tools/preview_planes.py -- out.png three-quarter falcon
+```
+
+Angles: `side`, `top`, `front`, `rear`, `nose`, `three-quarter`. Omit the plane
+id for a contact sheet of the whole fleet. This imports the **exported GLBs**
+rather than rebuilding in memory, so it checks the file, materials and axis
+conversion — not just the script that wrote them.
+
+`src/planeModel.js` maps the exported node names (`HULL`, `GLASS`, `AIRFRAME`,
+`PROP_n`, and the `EYE` / `MUZZLE_n` / `HARD_L` / `HARD_R` / `DISC_n` /
+`GEARBOTTOM` marker empties) onto the object contract `plane.js` already
+returned, so no caller can tell which path built the aircraft. If a GLB is
+missing or fails to load, the procedural airframe is used instead — a failed
+download costs you detail, not the sortie.
+
+### Menu theme (SuperCollider)
+
+```bash
+/Applications/SuperCollider.app/Contents/MacOS/sclang tools/build_music.scd
+```
+
+Rendered **non-real-time**, so it writes a file instead of opening the audio
+hardware — repeatable, faster than the piece is long, and building the assets
+does not blast music out of the machine doing it. Sixteen bars at 72 BPM in
+D minor.
+
+The loop is rendered twice and the second pass is what ships: by then the reverb
+tails and the noise bed have filled in, so the extracted region begins in the
+same steady state it ends in. Splicing the first pass would start dry and
+audibly re-enter. Verified by correlating the end of each pass — 0.9994, with
+the residual being the stochastic noise bed alone.
+
+```bash
+ffmpeg -i /tmp/warbird-music.aiff -ss 53.3333333 -t 53.3333333 loop.aiff
+ffmpeg -i loop.aiff -af "volume=6.7dB" -c:a libmp3lame -b:a 96k assets/audio/menu.mp3
+```
+
+The player sets `loopStart`/`loopEnd` from the known musical length rather than
+the decoded duration, because MP3 decoders pad both ends and the amount differs
+between browsers. `leadingSilence()` measures the padding at runtime.
+
 ### Debugging
 
 `window.sim` is exposed in the browser console:
@@ -351,6 +480,7 @@ Design rules worth keeping if you extend it:
 sim.state                 // live flight state
 sim.world                 // current world: buildings, hazards, runway
 sim.session               // mode, score, clock
+sim.audio                 // engine + music graph
 sim.setRunning(false)     // freeze the loop
 sim.economy.addCoins(9999)
 ```
@@ -365,9 +495,11 @@ sim.economy.addCoins(9999)
 - Flak is the only thing that shoots back — there are still no AI aircraft.
 - The flight model is arcade, not a study sim. Shared constants are at the top of
   `src/main.js`; per-aircraft ones are in `src/catalog.js`.
-- **Every model is procedural three.js geometry.** See [`HANDOFF.md`](HANDOFF.md)
-  — the aircraft were meant to be modelled in Blender, and the swap point is a
-  single function.
+- Aircraft are Blender-built; **everything else** — buildings, terrain, vehicles,
+  pedestrians, cockpit — is still procedural three.js geometry. See
+  [`HANDOFF.md`](HANDOFF.md).
+- The menu theme is the only audio file. Everything heard in flight is
+  synthesised live.
 
 ## Licence
 

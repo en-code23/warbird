@@ -1,7 +1,12 @@
 # Warbird — project handoff
 
-> For whoever picks this up next. Still written for an agent that **has Blender
-> MCP**, which neither session that built this had.
+> For whoever picks this up next.
+>
+> **Blender no longer needs an MCP.** The third session drove Blender 5.2
+> headlessly from a Python script (`tools/build_planes.py`), which is better than
+> an MCP would have been: the models are reproducible from the catalogue data
+> rather than hand-modelled once and frozen. The aircraft are done. Buildings,
+> terrain and the cockpit are not — see §2.
 >
 > Read [`README.md`](README.md) first for what the game is and how to run it.
 > This document is only about **state of the work**: what is done, what is not,
@@ -39,7 +44,7 @@
 | 20 | Better cockpit | **Partial** — see §3 |
 | 21 | Commented code | **Done** |
 | 22 | Good README | **Done** |
-| 23 | "Make everything realistic", use Blender | **NOT DONE — still the main outstanding item** |
+| 23 | "Make everything realistic", use Blender | **Aircraft done** — buildings/terrain/cockpit still procedural, §2 |
 
 ### Second round
 
@@ -54,6 +59,17 @@
 | Economy balance | **Done** — retuned, see §6 |
 | Persistent rubble | **Done** — collapsed buildings leave a heap |
 | Two-client multiplayer test | **Done** — and it found a real bug, see §5 |
+
+### Third round
+
+| Asked for | Status |
+|---|---|
+| Affinity for better UI | **Not possible — Affinity has no scripting interface.** Affinity 3.2.3 is installed but ships no CLI, no AppleScript dictionary and no plugin API, so nothing can drive it programmatically. The UI work was done directly in CSS: a shot-down card, a settings strip, and a HUD collision fix. See §8 |
+| Blender for better models | **Done** — all six airframes, `tools/build_planes.py`, §2 |
+| SuperCollider for music | **Done** — 16-bar menu theme rendered NRT, `tools/build_music.scd` |
+| Engine sound less annoying | **Done and measured** — dissonance −47% to −69%, §9 |
+| Mobile respawning | **Done** — it was genuinely unreachable before, §8 |
+| Fullscreen for phone | **Done** — explicit toggle plus auto-entry on launch, §8 |
 
 ---
 
@@ -80,17 +96,32 @@ over the WebGL context's `drawElements` / `drawArrays` / `drawElementsInstanced`
 
 ---
 
-## 2. Blender models — still the big one
+## 2. Blender models — aircraft done, scenery not
 
-**No Blender MCP server has been connected to either session that built this**,
-so every model in the repo is procedural three.js geometry. You have Blender MCP.
-This is still the highest-value thing to pick up.
+**The aircraft are Blender-built.** `tools/build_planes.py` drives Blender 5.2
+headlessly and exports one GLB per airframe; `src/planeModel.js` loads them.
+No MCP is involved and none is needed — see the README for the commands.
 
-### The swap point
+Do it the same way for anything else you model. Driving Blender from a script
+that reads the game's own data beats hand-modelling because the geometry cannot
+drift away from the stats, and anyone can regenerate the whole fleet from a
+clean checkout.
 
-All aircraft are built by one factory: `createPlane(spec, opts)` in
-`src/plane.js`. Nothing else knows how an aircraft is constructed. Replace the
-body with a `GLTFLoader` call and return the same shape:
+**Still procedural**, in rough value order:
+
+1. **The cockpit interior** — `src/cockpit.js`, still the weakest part of the
+   project. Highest value remaining.
+2. **Flak batteries** — `src/flak.js` builds them from a cylinder and a cone.
+   They must stay in two `InstancedMesh`es (bases and barrels) because the
+   barrel instance matrix is what tracks the target.
+3. **Pedestrians and vehicles** — both instanced; keep them that way.
+4. **Buildings** — see the warning below. Hardest, because of the shader hook.
+
+### The swap point (already taken, for reference)
+
+Aircraft come from `buildPlane(spec, opts)` in `src/planeModel.js`, which falls
+back to `createPlane(spec.model, opts)` in `src/plane.js` when a GLB is missing
+or fails to load. Both return the same shape:
 
 ```js
 {
@@ -113,15 +144,21 @@ Bake any axis correction into the geometry — do not change the flight code.
 `gearHeight` and `hull` are load-bearing: ground contact and building collision
 both come from them.
 
-### Priority order
+### Two things that will bite you
 
-1. **The six aircraft** — one per entry in `PLANES` (`src/catalog.js`).
-2. **A cockpit interior** — `src/cockpit.js` is the weakest part of the project.
-3. **Flak batteries** — `src/flak.js` builds them from a cylinder and a cone.
-   They must stay in two `InstancedMesh`es (bases and barrels) because the barrel
-   instance matrix is what tracks the target.
-4. **Pedestrians and vehicles** — both instanced; keep them that way.
-5. **Buildings** — see the warning below.
+**Axis conversion is free if you build for it.** Model with nose `+Y`, up `+Z`,
+span `X` in Blender, then export with `export_yup=True`. The exporter maps
+`(x,y,z) → (x, z, −y)`, which lands exactly on the game's `−Z` forward, `+Y` up.
+Do not rotate objects to fix it afterwards — rotation happens about the object
+origin, so geometry authored far down the fuselage swings its offset into the
+wrong axis. That bug put a tail fin six units under the aircraft.
+
+**Clones share buffers, so disposal is a hazard.** `planeModel.js` clones one
+cached template per aircraft type, so a lobby of eight Falcons uploads one set of
+buffers. Every shared geometry and material is flagged `userData.shared`, and
+`disposePlane()` is the only thing that may free one. Calling
+`geometry.dispose()` in a traverse — which is what the code used to do — would
+free the template out from under every other aircraft in the match.
 
 ### ⚠️ Buildings are instanced now — read this before touching them
 
@@ -261,12 +298,87 @@ Not done:
 
 - **No haptics.** `navigator.vibrate` on gun fire and touchdown would help.
 - **No control customisation** — sizes and positions are fixed.
-- **iOS Safari gets neither fullscreen nor an orientation lock** (it supports
-  neither API); the landscape nag covers it, but the address bar still eats
-  screen space.
+- **iPhone Safari still gets no fullscreen** — it exposes no Fullscreen API, so
+  the FULL switch and the menu toggle are both hidden there rather than offered
+  and silently doing nothing. The landscape nag covers orientation. Adding to the
+  home screen is the only way to lose the address bar on iPhone.
 - **Untested on real hardware.** Everything here was verified in a 844×390
   viewport with synthetic pointer events, which exercises the logic but tells you
   nothing about real thermals or touch latency. **Get it on an actual phone.**
+
+---
+
+## 8. UI work in the third round
+
+**Affinity cannot be scripted.** Affinity 3.2.3 is installed on the build
+machine, but it ships no CLI, no AppleScript dictionary (`osascript` reaches only
+the standard application suite) and no plugin API. Nothing can drive it
+programmatically, and a design tool would not have produced shippable CSS anyway.
+The UI work was done in `src/style.css` directly. If you want Affinity in the
+loop, the realistic use is exporting an SVG by hand and inlining it.
+
+Three changes:
+
+**The shot-down card** (`#down`). Being shot down previously printed
+`DOWN — press R to respawn` as a HUD banner. On a phone that is a dead end you
+cannot fly out of: there is no R key, and no other control respawns. It is now a
+card with a 56 px-tall button, which is the fix for "make mobile respawning
+work". The keyboard hint is hidden in touch mode, and the button is auto-focused
+only on non-touch so no stray focus ring appears on a phone.
+
+Worth keeping if you rework it: the test that mattered was
+`document.elementFromPoint()` at the button's centre returning `down-respawn`.
+A card that renders correctly but sits under the touch layer would look perfect
+in a screenshot and be untappable.
+
+**The settings strip** on the main menu — music, sound, fullscreen. Each is a
+lamp driven by real state, not remembered intent, so a browser-initiated
+fullscreen exit turns the light off. Fullscreen is hidden where unsupported.
+
+**A HUD collision fix**: `body.touch-mode .bl` sat at 84 px, and the four-gauge
+stack above it ends at 95 px, so the airframe-integrity bar printed through the
+heading readout on a short landscape phone. Now 104 px.
+
+---
+
+## 9. Audio
+
+`src/audio.js`. Routing is master → { music, sfx } so the two can be balanced
+and muted independently.
+
+**The engine was rebuilt against measurements**, not opinion.
+`tools/engine-measure.js` renders the old and new models through an
+`OfflineAudioContext` and scores both; the README has the table. Level-matched,
+sensory dissonance is down 47–69% and sub-40 Hz energy at idle went from 47.9%
+to 0.2%.
+
+Two things worth knowing if you tune it further:
+
+- **Measure tonal dissonance, not modulation-band energy.** The first metric
+  tried was envelope energy in the 20–150 Hz band, which reported the new engine
+  as *worse* — because a broadband prop-wash layer had deliberately been added,
+  and noise has a random envelope with energy everywhere. The Plomp–Levelt
+  pairwise-partial measure ignores broadband noise and tracks what "harsh"
+  actually is.
+- **Do not clamp the weight oscillator to a fixed floor.** Clamping it to 46 Hz
+  killed the wasted sub-bass but parked it ~15 Hz from the fundamental, inside a
+  critical band, and dissonance went *up*. Unison with the fundamental fixes both
+  at once and cannot beat.
+
+**The menu theme** is the only audio file: 16 bars at 72 BPM in D minor, rendered
+non-real-time by `tools/build_music.scd`. It plays on the menus and fades out on
+launch — in flight it would only fight the engine. See the README for the
+render, the two-pass loop trick, and why loop points come from the musical length
+rather than the decoded duration.
+
+Not done:
+
+- **No positional audio.** Other aircraft, flak and explosions are all centred
+  regardless of where they are. `PannerNode` per event would be a real upgrade.
+- **No in-game music bed.** Deliberate, but a very sparse one during Free Flight
+  might work.
+- **The engine has never been heard on a phone speaker.** The sub-40 Hz work was
+  aimed squarely at small drivers and is unverified on one.
 
 ---
 
@@ -314,11 +426,27 @@ genuine Safari failure mode, so it is wrapped in `capture()` in `touch.js`.
   destructible by both bombs and guns
 - **Two-client multiplayer**, end to end
 - The live GitHub Pages build, not just localhost
+- **All six Blender airframes load and assemble**: correct propeller count per
+  type (4 for the Fortress, 0 for the jet), correct muzzle count per catalogue
+  entry (1 / 4 / 6), plausible per-type ride heights
+- **The shot-down card and its respawn button**, including a hit test proving
+  nothing overlays the button, and the plane genuinely returning to the runway
+  rearmed and repaired
+- **Fullscreen** enters, and the lamps resync from the real `fullscreenchange`
+  event rather than from what we asked for
+- **The theme decodes to exactly 53.33333 s** — zero drift against the musical
+  length, so the loop points are sample-accurate
+- **Engine A/B**, level-matched, through an `OfflineAudioContext`
 
 ### Never tested
 
-- **Any of this on real mobile hardware.** The whole point of the round was
+- **Any of this on real mobile hardware.** The whole point of that round was
   thermals, and thermals cannot be measured in a desktop browser at a phone-sized
-  viewport. This is the first thing to verify.
+  viewport. This is still the first thing to verify.
+- **The music loop by ear.** The seam was verified numerically (0.9994
+  correlation between passes, zero decode drift) but nobody has listened to it
+  wrap. Listen to it once.
+- **The engine on a phone speaker** — see §9.
 - More than two multiplayer clients at once.
-- iOS Safari specifically (no fullscreen or orientation-lock API).
+- iPhone Safari specifically (no Fullscreen API; MP3 decode padding may differ,
+  which is why `leadingSilence()` measures it at runtime instead of assuming).
