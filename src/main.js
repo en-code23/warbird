@@ -422,9 +422,21 @@ async function launch({ mode, map, duration, room }) {
   );
 }
 
-/** Lateral lane spacing and row spacing for multiplayer spawn slots. */
-const SPAWN_LANE = 14;
-const SPAWN_ROW = 26;
+/**
+ * Multiplayer spawn spacing, measured along the runway.
+ *
+ * Line astern on the centreline, not abreast. Two earlier attempts put
+ * aircraft in lanes either side, and both were wrong for the same reason: the
+ * hangars sit close enough to the strip that anything more than a couple of
+ * metres off-centre clips one — not necessarily at the spawn point, but during
+ * the takeoff roll, which is worse because it looks like a random death. The
+ * paved centreline is the only strip of ground known to be clear for its whole
+ * length, so everyone departs down it in trail.
+ *
+ * 16 m is comfortably outside the 7 m ram radius, longer than every airframe
+ * bar the bomber, and fits a full 16-player lobby inside the runway.
+ */
+const SPAWN_ROW = 16;
 /** Seconds of immunity after a spawn, so a respawn is never an instant death. */
 const SPAWN_GRACE = 2.5;
 
@@ -458,12 +470,16 @@ function resetPlane() {
   // with no offset so singleplayer starts exactly where it always did; the
   // lane order must therefore be [centre, left, right] rather than starting at
   // one edge, or slots 0 and 1 land on the same spot.
+  // Slots run forward down the strip; there is only 30 m of runway behind the
+  // start point and none of it is paved. Spacing closes up on a short runway
+  // with a full lobby rather than running the back of the queue off the end,
+  // but never below the ram radius.
   const slot = spawnSlot();
-  if (slot > 0 && runway.side && runway.forward) {
-    const lane = [0, -1, 1][slot % 3];
-    const row = Math.floor(slot / 3);
-    g.position.addScaledVector(runway.side, lane * SPAWN_LANE);
-    g.position.addScaledVector(runway.forward, -row * SPAWN_ROW);
+  if (slot > 0 && runway.forward) {
+    const count = net.room?.players?.length ?? 1;
+    const usable = (runway.length ?? 300) - 70;
+    const spacing = Math.max(9, Math.min(SPAWN_ROW, usable / Math.max(1, count - 1)));
+    g.position.addScaledVector(runway.forward, slot * spacing);
   }
 
   g.quaternion.setFromAxisAngle(UP, Math.atan2(-runway.forward.x, -runway.forward.z));
@@ -1122,10 +1138,15 @@ function updateFlight(dt) {
   }
 
   // --- ramming another aircraft takes you both out ---
+  // Only in the air, which is what the mechanic is for and what the message
+  // says. On the ground everyone departs down the same centreline, so any
+  // difference in how fast two clients are simulating turns into a rear-end
+  // collision on the runway — and a client whose tab is throttled falls behind
+  // network time enough to be overtaken by an aircraft that is really beside it.
   if (state.spawnGrace > 0) state.spawnGrace -= dt;
-  else {
+  else if (!state.grounded) {
     for (const r of remotes.values()) {
-      if (!r.alive) continue;
+      if (!r.alive || !r.placed) continue;
       if (g.position.distanceTo(r.group.position) < 7) {
         net.reportHit(r.id, 9999);
         crash('MID-AIR COLLISION');
@@ -1309,6 +1330,8 @@ function syncRemotes(dt) {
       scene.add(model.group);
       r = {
         id, model, group: model.group, name: p.name, alive: true,
+        /** false until the first state arrives, so we snap rather than sweep */
+        placed: false,
         target: new THREE.Vector3(),
         targetQ: new THREE.Quaternion()
       };
@@ -1317,11 +1340,22 @@ function syncRemotes(dt) {
     if (p.p) r.target.set(p.p[0], p.p[1], p.p[2]);
     if (p.q) r.targetQ.set(p.q[0], p.q[1], p.q[2], p.q[3]);
     r.alive = p.alive !== 0;
-    r.group.visible = r.alive;
+    // stays hidden until it has a real position, so nothing is drawn at the origin
+    r.group.visible = r.alive && r.placed;
 
-    // interpolate toward the last received state rather than snapping
-    r.group.position.lerp(r.target, Math.min(1, 10 * dt));
-    r.group.quaternion.slerp(r.targetQ, Math.min(1, 10 * dt));
+    if (!r.placed && p.p) {
+      // Snap to the first position we hear about. Interpolating in from the
+      // origin means the aircraft sweeps across the whole map to reach its real
+      // place, and anything that sweep passes within 7 m of registers as a
+      // mid-air collision — which killed people at the start of every match.
+      r.group.position.copy(r.target);
+      r.group.quaternion.copy(r.targetQ);
+      r.placed = true;
+    } else {
+      // interpolate toward the last received state rather than snapping
+      r.group.position.lerp(r.target, Math.min(1, 10 * dt));
+      r.group.quaternion.slerp(r.targetQ, Math.min(1, 10 * dt));
+    }
     for (const prop of r.model.propellers) prop.rotation.z += 40 * dt;
   }
 
@@ -1346,7 +1380,9 @@ function clearRemotes() {
 function gunTargets() {
   const list = [];
   for (const r of remotes.values()) {
-    if (r.alive) list.push({ id: r.id, position: r.group.position, radius: 6, alive: true });
+    if (r.alive && r.placed) {
+      list.push({ id: r.id, position: r.group.position, radius: 6, alive: true });
+    }
   }
   return list;
 }
